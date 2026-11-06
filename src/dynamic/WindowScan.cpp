@@ -60,6 +60,7 @@ namespace db::scan {
 			std::vector<ExactState> ref;    // state at the end of step tick 2, 4, 6 ... (index tick/2 - 1)
 			std::vector<Event> refEvents;
 			std::vector<uint32_t> anchors;  // ticks where a resting period starts
+			std::vector<uint32_t> shipStarts; // ticks where the reference run turns into a ship
 			bool surveyDone = false;
 			bool levelEnded = false;        // the survey reached the end of the level
 			uint32_t refEndTick = 0;
@@ -196,6 +197,9 @@ namespace db::scan {
 			for (size_t i = 0; i < s.ref.size(); ++i) {
 				bool r = restingAt(i, tmp);
 				if (r && !prev) s.anchors.push_back(static_cast<uint32_t>((i + 1) * 2));
+				bool ship = s.ref[i].p1.basic.gamemode & 1;
+				bool wasShip = i > 0 && (s.ref[i - 1].p1.basic.gamemode & 1);
+				if (ship && !wasShip) s.shipStarts.push_back(static_cast<uint32_t>((i + 1) * 2));
 				prev = r;
 			}
 		}
@@ -206,6 +210,10 @@ namespace db::scan {
 			uint32_t after = std::max(frame, s.base[i].frame);
 			auto it = std::upper_bound(s.anchors.begin(), s.anchors.end(), after);
 			uint32_t h = it != s.anchors.end() ? *it + 2 * CONFIRM_STEPS + 2 : s.refEndTick;
+			// Ship parts are out of scope: a trial must have rejoined the run before the next ship
+			// section starts (the ship has no resting points, so it couldn't be shown later anyway).
+			auto ship = std::upper_bound(s.shipStarts.begin(), s.shipStarts.end(), after);
+			if (ship != s.shipStarts.end()) h = std::min(h, *ship);
 			return std::min(h, s.refEndTick);
 		}
 
@@ -465,7 +473,8 @@ namespace db::scan {
 			out += "#   by the next resting point, or beats the level. exact = before the next input; chained = later\n";
 			out += "# early/late: steps (1 step = 2 ticks = 1/240 s) that pass; (x) = how many of those nearest the recorded frame are exact\n";
 			out += "# flags: <prev / next> = scan reached the neighbouring input or checkpoint, max = scan range, gap< / gap> = a frame past the\n";
-			out += "#        first failure passed again, UNMEASURED = the checkpoint replay didn't match the recorded run, - = not scanned\n";
+			out += "#        first failure passed again, UNMEASURED = the checkpoint replay didn't match the recorded run, - = not scanned,\n";
+			out += "#        ship (skipped) = ship parts are left out of Dynamic for now\n";
 			out += "#   idx    tick      time  key action    early     late  frames   flags\n";
 
 			std::vector<std::pair<int, size_t>> tightest;
@@ -480,10 +489,11 @@ namespace db::scan {
 				if (w.flags & InputWindow::EarlyGap) flags += " gap<";
 				if (w.flags & InputWindow::LateGap) flags += " gap>";
 				if (w.flags & InputWindow::BaselineFailed) flags += " UNMEASURED";
+				if (w.flags & InputWindow::ShipSkipped) flags += " ship (skipped)";
 				out += fmt::format("{:>6} {:>7} {:>9}  {}   {:<7} {:>3}({:>2}) {:>3}({:>2})  {:>6}  {}\n",
 					i, in.frame, tickTime(in.frame), in.player2 ? "P2" : "P1", in.down ? "press" : "release",
 					w.early, w.earlyExact, w.late, w.lateExact, int(w.early) + int(w.late) + 1, flags);
-				if (w.scanned && !(w.flags & InputWindow::BaselineFailed) && in.down) {
+				if (w.scanned && !(w.flags & (InputWindow::BaselineFailed | InputWindow::ShipSkipped)) && in.down) {
 					tightest.push_back({int(w.early) + int(w.late) + 1, i});
 				}
 			}
@@ -542,13 +552,34 @@ namespace db::scan {
 			if (!same) s.eventsDiverged = true;
 		}
 
+		// Ship parts are left out of Dynamic for now (user's call): a click where the reference run is
+		// a ship isn't scanned and is flagged so Dynamic leaves it alone.
+		void skipShipInputs() {
+			size_t skipped = 0;
+			for (size_t i = 0; i < s.base.size(); ++i) {
+				if (!s.toScan[i]) continue;
+				auto r = refIndex(s.base[i].frame);
+				if (!r || !(s.ref[*r].p1.basic.gamemode & 1)) continue; // bit 0 = ship
+				s.toScan[i] = false;
+				s.result[i].window = {};
+				s.result[i].window.scanned = true;
+				s.result[i].window.flags = InputWindow::ShipSkipped;
+				skipped++;
+			}
+			if (skipped) {
+				s.inputsTotal -= skipped;
+				log::info("dynamic: {} inputs are in ship parts and are skipped", skipped);
+			}
+		}
+
 		void finishSurvey(PlayLayer* pl) {
 			s.refEndTick = static_cast<uint32_t>(s.ref.size() * 2);
 			findAnchors();
+			skipShipInputs();
 			buildJobs();
-			log::info("dynamic: reference run recorded to tick {} ({:.2f} s{}), {} interactions, {} resting points; {} inputs in {} groups",
+			log::info("dynamic: reference run recorded to tick {} ({:.2f} s{}), {} interactions, {} resting points, {} ship sections; {} inputs to scan in {} groups",
 				s.refEndTick, s.refEndTick / 480.0, s.levelEnded ? ", level end" : "", s.refEvents.size(),
-				s.anchors.size(), s.inputsTotal, s.jobs.size());
+				s.anchors.size(), s.shipStarts.size(), s.inputsTotal, s.jobs.size());
 			if (s.jobs.empty()) {
 				finishScan(true);
 				return;

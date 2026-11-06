@@ -30,6 +30,7 @@ namespace db {
 			BaselineFailed = 16, // unmeasured: the checkpoint replay didn't match the recorded run exactly
 			EarlyGap = 32,       // a frame beyond the first early failure passed again (window has a hole)
 			LateGap = 64,
+			ShipSkipped = 128,   // the player is a ship at this input: not scanned, Dynamic leaves it alone (for now)
 		};
 		bool scanned = false;
 		uint8_t early = 0;      // steps (1 step = 2 ticks) that pass, exact or chained

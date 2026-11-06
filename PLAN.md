@@ -427,6 +427,20 @@ own windows. Results go in the replay extension as per-input (earliest, latest).
 
 ## 10b. Known issues going into Dynamic (M9)
 
+**User decisions (after the list below was written):**
+- Dynamic requires 240 FPS and 1x speed; CBS/CBF stay forced off (items 1, 2 settled).
+- Click matching (item 5): for now assume the player has the same click pattern as the macro.
+- Releases are assisted too (item 7), but **ship parts are left out of Dynamic for now**. The scan
+  flags clicks where the reference run is a ship as `ShipSkipped` (not scanned), and trials must
+  rejoin the run before the next ship section starts. This sets aside most of the hard cases
+  (few resting points, rounded checkpoints, gaps).
+- Pausing during a hold (item 10): extremely low priority.
+- Result with ship skipped (Stereo Madness): 238 of 324 inputs are in its 2 ship sections and were
+  skipped; the 86 cube inputs scanned in 98.7 s (was 353.6 s for all 324), 2,809 trials, 0 unmeasured,
+  5 gaps. Cube presses average 16 steps early / 2.3 late, releases 19.9 / 20.0. The only 0-early press
+  (71.888 s) is the last jump before the second ship section: trials must rejoin before the ship starts.
+
+
 **Will affect how Dynamic behaves**
 1. **Windows are only valid at 240 FPS, 1x speed.** The scan runs one physics step per frame; grouping
    steps differently changed 6 of 24 windows by a step (scan speed-up attempt). Players at other FPS,

@@ -409,7 +409,7 @@ namespace db::ui {
 					presses += in.down;
 					if (!in.window.scanned) continue;
 					scanned++;
-					if (in.down && !(in.window.flags & InputWindow::BaselineFailed)) {
+					if (in.down && !(in.window.flags & (InputWindow::BaselineFailed | InputWindow::ShipSkipped))) {
 						scannedPresses++;
 						frames += in.window.early + in.window.late + 1;
 					}
