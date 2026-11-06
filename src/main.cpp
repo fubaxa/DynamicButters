@@ -20,7 +20,7 @@ $on_mod(Loaded) {
 		auto text = on ? fmt::format("Speedhack on ({:.2f}x)", mod->getSettingValue<double>("speedhack"))
 			: std::string("Speedhack off");
 		Notification::create(text, NotificationIcon::Info, 1.f)->show();
-		log::info("speedhack: {} via hotkey", on ? "on" : "off");
+		log::info("speedhack: {} via hotkey (speed setting {:.2f}x)", on ? "on" : "off", mod->getSettingValue<double>("speedhack"));
 		return false;
 	});
 }

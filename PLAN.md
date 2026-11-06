@@ -231,7 +231,7 @@ when triggers and objects are dense.
 
 | Key | Default | Notes |
 |---|---|---|
-| `safe-mode` | `true` | Turn off at your own risk |
+| `safe-mode` | `true` | Unsafe attempt (playback, speedhack ≠ 1.0x) = test mode, no progress saved. Turn off at your own risk |
 | `checkpoint-test` | `false` | Debug, M4: automatic checkpoint precision test |
 | `speedhack-enabled` | `false` | Speedhack on/off. Also in the pause popup and on the hotkey |
 | `speedhack-key` | `Alt+S` | Keybind setting (Geode, gameplay category): toggles `speedhack-enabled` |
@@ -258,7 +258,7 @@ when triggers and objects are dense.
 | ➕ Pause fix ⏸ deferred | Pausing during a macro hold breaks the hold. See "Open issues" at the end | — |
 | M5 ✅ | Practice-mode recording. Verified: Eclypse challenge 4 recorded in practice mode, played back to 100% in normal mode (4 runs; see Open issues for the drift seen in 2 of them). Built: cut-back on respawn (inputs after the checkpoint tick removed). Found from the logs: after every practice respawn at tick T, GD sends its own release (P1 key) at T+2, so a re-press isn't needed; instead the recording must *end* a hold that was active at the checkpoint. For each held key a release is added at T+2, using the player state when GD's release arrives (fallback: respawn state). This fixes holds on the P2 key, whose release GD's P1-key release didn't cover | Practice-recorded macro (with deaths, including deaths mid-hold) replays to 100% in normal mode with physics correction off |
 | M6 ✅ | GDR2 save/load + pause-menu UI. Built: own GDR2 reader/writer (`macro/Gdr2.cpp`, matches the reference library byte for byte: LEB128 varints, big-endian float/double, "Phys" input tag, P1 then P2 lists). File frame = tick / 2 (GDR2 counts 240/s steps); files with another framerate are scaled with a warning; platformer left/right inputs are dropped. Our replay extension: endTick + recordedAt. Files live in `<save dir>/macros/`, named after the level (`Name (2).gdr2` if taken), saved automatically on level complete. Playback picks: the file chosen in the popup, else this session's recording, else the newest file for the level (matched by ID, and by name for ID 0 levels, which fixes the local-level clash). The old text dumps are converted once at startup (`imported_<id>_<time>.gdr2`). The pause "DB" button opens the DynamicButter popup: mode (Off/Record/Playback, stored in the `macro-mode` setting), status, Load (file list, this level's macros first), Auto, Folder, Settings | Round-trip works; a `.gdr2` from another bot plays back |
-| M7 | Safe mode + settings | Playback completion doesn't save progress; setting turns it off |
+| M7 ✅ | Safe mode + settings. Built (`safety/SafeMode.cpp`): an attempt is unsafe once playback is active or the speedhack runs at anything but 1.0x (checked at attempt start, every frame, on death and on completion; practice respawns keep the flag, a restart from 0 clears it; `markUnsafe()` is ready for Dynamic/seek). While unsafe and `safe-mode` is on (default), `PlayLayer::m_isTestMode` (GD's own no-saving state, used by start positions) is held on for the rest of the attempt, so death (new best %) and level complete (completion, rewards, leaderboard) don't save; GD's original value comes back on a clean attempt. In-game label "Safe mode: <reason>" under the tick counter, and a line in the popup. Also: speedhack now pitches FMOD's master channel group, so the song speeds up with the sound effects | Playback completion doesn't save progress; setting turns it off |
 | M8 | Seek / macro start positions | Start from a snapshot, play the macro the rest of the way, beat the level |
 | M9 | Dynamic hook-in point | Scheduler takes "delay this user input to tick X" |
 
@@ -297,6 +297,13 @@ when triggers and objects are dense.
   The Eclypse challenge 4 drift (dx/dy=2.4 at tick 694 in 2 of 4 playbacks), first blamed on the
   random seed, is probably the same bug (that recording had a checkpoint at tick 204 with dx=1.61).
   Re-record it and play with correction off to confirm; look at the seed only if it still drifts.
+- **Playback at a speedhack other than 1.0x drifts a little** (found in M7 testing). At 1.00x playback
+  is exact (Supersonic 472 inputs, ship 94 inputs: 0 drift with correction off). At 1.25x: Supersonic
+  dx=1.95 at tick 22686, ship dx=2.4 at tick 8704/10208. Physics correction snaps it back, so the runs
+  complete. Likely cause: the speedhack scales frame time, so a different number of physics steps
+  runs per rendered frame than when recording, and some of GD's per-frame work (not per-step) then
+  happens at different steps. A fix would keep the steps-per-frame grouping identical to the recording
+  (store it in the replay extension, or drive steps directly instead of scaling dt). Not needed now.
 - **Local/editor levels all have level ID 0**, so they shared one recording slot (an Aurorae 2
   playback loaded a different level's recording). M6: macros are matched by ID and, for ID 0, by name.
   Two local levels with the same name can still clash.

@@ -12,6 +12,7 @@
 
 #include "macro/MacroManager.hpp"
 #include "macro/MacroStore.hpp"
+#include "safety/SafeMode.hpp"
 
 using namespace geode::prelude;
 
@@ -401,6 +402,11 @@ namespace db::ui {
 				text += "Selected: newest macro of this level (Auto)\n";
 			}
 			if (!mgr.lastSaved().empty()) text += fmt::format("Last saved: {}\n", mgr.lastSaved());
+			if (!safe::enabled()) {
+				text += "Safe mode: OFF\n";
+			} else if (safe::unsafe()) {
+				text += fmt::format("Safe mode: this attempt won't save ({})\n", safe::reason());
+			}
 			if (mgr.hasPendingChange()) {
 				text += "\nChanges apply when you restart the level.";
 			} else if (pending == MacroMode::Record) {

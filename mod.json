@@ -9,6 +9,12 @@
 	"developer": "fubaxa",
 	"description": "Frame-accurate macros and the Dynamic click-window trainer.",
 	"settings": {
+		"safe-mode": {
+			"type": "bool",
+			"default": true,
+			"name": "Safe mode",
+			"description": "An attempt that used macro playback or a speedhack other than 1.0x doesn't save progress: no new best, completion, stars, orbs, coins or leaderboard entry. Turn off at your own risk."
+		},
 		"macro-mode": {
 			"type": "string",
 			"default": "Off",
@@ -39,7 +45,7 @@
 				"slider-step": 0.05
 			},
 			"name": "Speedhack",
-			"description": "Game speed while in a level (1.0 = normal), music included, when the speedhack is enabled. Useful for recording hard levels slowly: macros are timed by tick, so they replay identically at 1.0. Attempts below or above 1.0 will be safe-mode only once safe mode exists (M7)."
+			"description": "Game speed while in a level (1.0 = normal), music included, when the speedhack is enabled. Useful for recording hard levels slowly: macros are timed by tick, so they replay identically at 1.0. Attempts at any speed other than 1.0 don't save progress while safe mode is on."
 		},
 		"checkpoint-test": {
 			"type": "bool",

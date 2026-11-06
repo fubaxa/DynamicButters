@@ -9,6 +9,7 @@
 #include "debug/CheckpointTester.hpp"
 #include "physics/PreciseCheckpoints.hpp"
 #include "physics/PlayerState.hpp"
+#include "safety/SafeMode.hpp"
 
 using namespace geode::prelude;
 
@@ -17,6 +18,8 @@ using namespace geode::prelude;
 class $modify(DBPlayLayer, PlayLayer) {
 	struct Fields {
 		CCLabelBMFont* tickLabel = nullptr;
+		CCLabelBMFont* safeLabel = nullptr;
+		bool baseTestMode = false; // GD's own test mode (start position), restored when the attempt is clean
 		std::optional<unsigned> endTick; // set on level complete: the overlay freezes here
 	};
 
@@ -25,6 +28,7 @@ class $modify(DBPlayLayer, PlayLayer) {
 		db::MacroManager::get().onLevelStart(level);
 		db::cptest::onLevelStart();
 		if (!PlayLayer::init(level, dontCreateObjects)) return false;
+		m_fields->baseTestMode = m_isTestMode;
 		log::info("PlayLayer::init level {} '{}' twoPlayer={} cbsOverride={} clickBetweenSteps={} clickOnSteps={}",
 			level->m_levelID.value(), level->m_levelName,
 			m_levelSettings ? m_levelSettings->m_twoPlayerMode : false,
@@ -46,12 +50,30 @@ class $modify(DBPlayLayer, PlayLayer) {
 		label->setVisible(db::settings::showTickCounter());
 		this->addChild(label, 1000);
 		m_fields->tickLabel = label;
+
+		// Shown while the attempt won't save progress (safe mode).
+		auto safe = CCLabelBMFont::create("Safe mode", "bigFont.fnt");
+		safe->setID("safe-mode-label"_spr);
+		safe->setScale(0.35f);
+		safe->setOpacity(200);
+		safe->setColor({255, 120, 120});
+		safe->setAnchorPoint({0.f, 1.f});
+		safe->setPosition({5.f, win.height - 20.f});
+		safe->setVisible(false);
+		this->addChild(safe, 1000);
+		m_fields->safeLabel = safe;
 		return true;
 	}
 
 	void postUpdate(float dt) {
 		PlayLayer::postUpdate(dt);
 		db::cptest::onFrameEnd(this);
+		applySafeMode();
+		if (auto safe = m_fields->safeLabel) {
+			bool blocking = db::safe::blocking();
+			safe->setVisible(blocking);
+			if (blocking) safe->setString(fmt::format("Safe mode: {}", db::safe::reason()).c_str());
+		}
 		auto label = m_fields->tickLabel;
 		if (!label) return;
 		bool show = db::settings::showTickCounter();
@@ -83,6 +105,8 @@ class $modify(DBPlayLayer, PlayLayer) {
 		db::debug::respawnTick = now;
 		db::debug::probeAtTick = now + db::debug::PROBE_DELAY;
 		db::MacroManager::get().onAttemptStart(this, now, m_isPracticeMode);
+		db::safe::onAttemptStart(now);
+		applySafeMode();
 		db::cptest::onAttemptStart(this, now);
 	}
 
@@ -91,7 +115,27 @@ class $modify(DBPlayLayer, PlayLayer) {
 		m_fields->endTick = tick;
 		db::MacroManager::get().onLevelComplete(this, tick);
 		db::cptest::logSummary("level complete");
+		applySafeMode();
+		if (db::safe::blocking()) log::info("safe-mode: level complete not saved ({})", db::safe::reason());
 		PlayLayer::levelComplete();
+	}
+
+	// GD saves a new best % when the player dies.
+	void destroyPlayer(PlayerObject* player, GameObject* object) {
+		applySafeMode();
+		PlayLayer::destroyPlayer(player, object);
+	}
+
+	// Safe mode uses test mode, GD's own "don't save progress" state (start positions use it). It
+	// stays on for the whole unsafe attempt, because GD can also save after levelComplete returns
+	// (end animation, end screen); it's set back to GD's own value when a clean attempt starts.
+	void applySafeMode() {
+		db::safe::check();
+		bool want = m_fields->baseTestMode || db::safe::blocking();
+		if (m_isTestMode != want) {
+			m_isTestMode = want;
+			log::info("safe-mode: test mode {}", want ? "on" : "off");
+		}
 	}
 
 	void onQuit() {
