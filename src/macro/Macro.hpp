@@ -17,19 +17,25 @@ namespace db {
 		double yVel = 0.0;
 	};
 
-	// Dynamic (window scan): how many physics steps earlier / later this input can happen with
-	// the rest of the macro unchanged and the player still surviving past the next input.
+	// Dynamic (window scan): how many physics steps earlier / later this input can happen and the
+	// run still comes back to exactly the recorded run (same player state and level interactions):
+	// "exact" = back before the next input, otherwise "chained" = back within the next few inputs
+	// at their recorded ticks. Frames where the player only survives don't count.
 	struct InputWindow {
 		enum Flags : uint8_t {
-			EarlyBound = 1,      // the scan stopped at the previous input (window may be larger)
+			EarlyBound = 1,      // the scan stopped at the previous input / checkpoint (window may be larger)
 			LateBound = 2,       // the scan stopped at the next input
 			EarlyMax = 4,        // the scan stopped at the scan range
 			LateMax = 8,
-			BaselineFailed = 16, // the unmodified macro didn't pass from the checkpoint: no window
+			BaselineFailed = 16, // unmeasured: the checkpoint replay didn't match the recorded run exactly
+			EarlyGap = 32,       // a frame beyond the first early failure passed again (window has a hole)
+			LateGap = 64,
 		};
 		bool scanned = false;
-		uint8_t early = 0; // steps (1 step = 2 ticks)
+		uint8_t early = 0;      // steps (1 step = 2 ticks) that pass, exact or chained
 		uint8_t late = 0;
+		uint8_t earlyExact = 0; // of those, the steps nearest the recorded frame that are exact
+		uint8_t lateExact = 0;
 		uint8_t flags = 0;
 	};
 

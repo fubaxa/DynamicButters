@@ -421,7 +421,7 @@ namespace db::ui {
 					text += fmt::format("Windows: {} of {} inputs scanned, average click window {:.1f} frames\n",
 						scanned, play->inputs.size(), scannedPresses ? double(frames) / scannedPresses : 0.0);
 				}
-				text += fmt::format("\nScan: restarts in practice mode and tests every click up to\n{} steps earlier and later (1 step = 1/240 s). It can take a while;\nprogress shows at the top left. Report: <macro>.windows.txt",
+				text += fmt::format("\nScan: plays the macro once, splits the level at resting points, then tests every\nclick up to {} steps earlier and later (1 step = 1/240 s). Progress is saved per\ngroup, so a stopped scan can continue. Report: <macro>.windows.txt",
 					Mod::get()->getSettingValue<int64_t>("dynamic-scan-range"));
 			}
 			auto info = label(text, "chatFont.fnt", 0.65f);
@@ -435,11 +435,27 @@ namespace db::ui {
 				m_buttonMenu->addChild(btn);
 				row.push_back(btn);
 			};
-			addBtn("Scan windows", "GJ_button_01.png", [this](CCMenuItemSpriteExtra*) {
-				if (!scan::start()) return;
+			bool partial = false, anyScanned = false;
+			if (play) {
+				for (auto const& in : play->inputs) {
+					bool done = in.window.scanned && !(in.window.flags & InputWindow::BaselineFailed);
+					anyScanned = anyScanned || in.window.scanned;
+					partial = partial || !done;
+				}
+				partial = partial && anyScanned;
+			}
+			addBtn(partial ? "Continue scan" : "Scan windows", "GJ_button_01.png", [this](CCMenuItemSpriteExtra*) {
+				if (!scan::start(false)) return;
 				if (m_closeParent) m_closeParent();
 				this->onClose(nullptr);
 			});
+			if (anyScanned) {
+				addBtn("Rescan all", "GJ_button_04.png", [this](CCMenuItemSpriteExtra*) {
+					if (!scan::start(true)) return;
+					if (m_closeParent) m_closeParent();
+					this->onClose(nullptr);
+				});
+			}
 			addBtn("Folder", "GJ_button_04.png", [](CCMenuItemSpriteExtra*) {
 				auto dir = store::macrosDir();
 				(void)file::createDirectoryAll(dir);

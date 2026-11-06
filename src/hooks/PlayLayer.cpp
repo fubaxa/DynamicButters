@@ -135,6 +135,33 @@ class $modify(DBPlayLayer, PlayLayer) {
 		PlayLayer::levelComplete();
 	}
 
+	// End-of-level text, effect and end screen: blocked while a Dynamic scan runs (and shortly after),
+	// since every trial that reaches the end wall would otherwise queue one.
+	// The end animation is a chain of timed actions that ends in levelComplete. During a scan it must
+	// not start at all (see WindowScan.hpp); reaching the end wall counts as completing the level.
+	void playEndAnimationToPos(CCPoint position) {
+		if (db::scan::active() && db::scan::suppressEndUI()) {
+			db::scan::onLevelComplete();
+			return;
+		}
+		PlayLayer::playEndAnimationToPos(position);
+	}
+
+	void showCompleteText() {
+		if (db::scan::suppressEndUI()) return;
+		PlayLayer::showCompleteText();
+	}
+
+	void showCompleteEffect() {
+		if (db::scan::suppressEndUI()) return;
+		PlayLayer::showCompleteEffect();
+	}
+
+	void showEndLayer() {
+		if (db::scan::suppressEndUI()) return;
+		PlayLayer::showEndLayer();
+	}
+
 	// GD saves a new best % when the player dies.
 	void destroyPlayer(PlayerObject* player, GameObject* object) {
 		if (db::scan::onPlayerDied(this, object)) return; // a scan trial failed; no GD death

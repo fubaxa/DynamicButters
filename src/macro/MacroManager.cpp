@@ -543,18 +543,21 @@ namespace db {
 	}
 
 	void MacroManager::saveWindows(std::vector<MacroInput> scanned) {
-		restoreInputs();
 		if (!m_play) return;
-		m_play->inputs = std::move(scanned);
+		// During a scan m_play holds a trial's inputs; the macro's own inputs are in m_savedInputs.
+		if (m_savedInputs) *m_savedInputs = scanned;
+		else m_play->inputs = scanned;
 		if (m_lastRecording && m_lastRecording->recordedAt == m_play->recordedAt
 			&& m_lastRecording->isFor(m_play->levelID, m_play->levelName)) {
-			m_lastRecording->inputs = m_play->inputs;
+			m_lastRecording->inputs = scanned;
 		}
 		if (m_playPath.empty()) {
 			log::warn("dynamic: macro has no file; windows are kept for this session only");
 			return;
 		}
-		if (auto res = store::overwrite(m_playPath, *m_play); !res) {
+		Macro copy = *m_play;
+		copy.inputs = std::move(scanned);
+		if (auto res = store::overwrite(m_playPath, copy); !res) {
 			log::error("dynamic: saving windows to {} failed: {}", m_playPath, res.unwrapErr());
 		} else {
 			log::info("dynamic: saved windows to {}", store::fileNameOf(m_playPath));

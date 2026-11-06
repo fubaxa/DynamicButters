@@ -11,7 +11,7 @@ namespace db::gdr2 {
 	namespace {
 		constexpr int FORMAT_VERSION = 2;
 		constexpr int GAME_VERSION = 22091;
-		constexpr uint64_t EXT_VERSION = 4; // 2: + start ticks, 3: + x path, 4: + Dynamic windows
+		constexpr uint64_t EXT_VERSION = 5; // 2: + start ticks, 3: + x path, 4: + Dynamic windows, 5: + exact counts
 		constexpr char const* PHYS_TAG = "Phys";
 		constexpr uint64_t MAX_STRING = 0xFFFF; // same limit as the reference reader
 
@@ -154,6 +154,8 @@ namespace db::gdr2 {
 			ext.varint(in.window.early);
 			ext.varint(in.window.late);
 			ext.varint(in.window.flags);
+			ext.varint(in.window.earlyExact); // v5
+			ext.varint(in.window.lateExact);
 			prevWinTick = in.frame;
 		}
 		w.block(ext);
@@ -254,6 +256,13 @@ namespace db::gdr2 {
 					e.w.early = static_cast<uint8_t>(ext.varint());
 					e.w.late = static_cast<uint8_t>(ext.varint());
 					e.w.flags = static_cast<uint8_t>(ext.varint());
+					if (extVersion >= 5) {
+						e.w.earlyExact = static_cast<uint8_t>(ext.varint());
+						e.w.lateExact = static_cast<uint8_t>(ext.varint());
+					} else {
+						// v4 windows were survival-based: not comparable, treat as unscanned
+						e.w.scanned = false;
+					}
 					wins.push_back(e);
 				}
 				if (!ext.ok()) wins.clear();

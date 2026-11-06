@@ -330,7 +330,85 @@ virtual frame (1 near a checkpoint), 50 ms per rendered frame, and hiding the le
 - The ship challenge windows saved after that run (file + report) come from the 16-step version:
   re-scan with the 1-step build to restore them.
 
-Agreed design: For each click of the macro, find its real window by
+**Window scan v3: sections between resting points (working).** First run, ship challenge: reference run to the level end (tick 3310), 102 interactions, 4 resting points; 329 trials (67 exact, 41 chained, 0 survived-only, 221 died) in 21.9 s (8,149 ticks/s); no checkpoint failed Verify any more (v2's 4 failures went away when rotation stopped being compared); click windows 1-9 frames, mostly chained, the open first/last releases 32-37 frames; one gap (input 0, late side). v2's first run
+("ship challenge"): 36 exact, 0 chained, 66 survived-only, 124 died; every click but one got a 0-frame
+window, because a ship moved by one step never rejoins the recorded run within 3 inputs, and 4
+checkpoints near the end failed Verify on their first step. Changes (user's idea: cut the level where
+the icon rests on a block):
+- **Survey:** the scan first plays the whole macro once from the start, unbroken. That run is the
+  reference for every Verify and trial (replaces per-checkpoint reference runs).
+- **Resting points:** ticks where P1 is on the ground/ceiling with yVel 0, not dashing or holding, and
+  stays at the same height/mode/size/speed for 8 steps, with no macro hold. Any run that lands there
+  the same way is identical from then on.
+- **Pass:** reconverged exactly (8 identical steps + same interactions) by the first resting point after
+  the click, or beat the level. Exact = before the next input, chained = later (replaces CHAIN_MAX = 3).
+- **Rotation is no longer compared** (the player hitbox doesn't rotate; a rolling ball would never match).
+- **Verify failures log the fields that differ.**
+- **Saved after every checkpoint group**; Continue scan does only unscanned/unmeasured inputs; Rescan all
+  redoes everything; a stopped scan keeps its results and writes the report.
+
+**v3 second run ("ship", 94 inputs, ship + spider + cube):** 69 of 94 inputs UNMEASURED, two causes
+named by the Verify log, plus two smaller issues. Fixed (not yet re-tested):
+- **Player 2 compared outside dual mode:** in an unbroken run GD keeps updating player 2 in the
+  background (x=2918.7, ship mode...), after a respawn it stays at x=0. Now compared only when
+  `m_gameState.m_isDualMode` is on.
+- **GD checkpoints round y and y-velocity** (ship: yVel 0.186 after respawn vs 0.1855 in the run, y off
+  by 0.02-0.05). So GD checkpoints are *not* exact in ship sections (cube tests never showed it). The
+  scan now stores the exact x/y/yVel when it places a checkpoint (at frame end, where the capture is
+  correct) and restores it after every respawn there.
+- Only 3 resting points found: the survey now logs how many steps pass each resting condition.
+- Trials whose horizon is the level end may run up to 960 ticks past the reference end, so a run
+  that reaches the end wall slightly later counts as beating the level instead of "survived only".
+
+**v3 third run ("ship"):** UNMEASURED dropped from 69 to 1 (the P2 and exact-restore fixes worked).
+The remaining one (checkpoint at tick 8020) differs in an orb/pad/trigger interaction right after the
+respawn; not investigated yet. But only 3 resting points: of 5,361 steps, 882 were on the ground and
+only 202 of those had yVel exactly 0 (GD keeps a small y-velocity on most grounded steps), so almost no
+sections and most trials ran to the level end (2,069 trials, 162 s). **Fixed:** resting = settled
+state (grounded, same y, same y-velocity whatever it is, same gamemode/size/speed/slope/jump buffer,
+not dashing, no button held, for 8 steps), not yVel == 0. The survey logs the most common grounded
+y-velocity values to confirm.
+
+Note: the 13:17 scan still ran the old resting rule (GD had been started before the new build was
+installed), so the settled-state rule is untested. After that scan many "practice complete" popups
+appeared: every trial reaching the end wall starts GD's end sequence. `showCompleteText`,
+`showCompleteEffect` and `showEndLayer` are now skipped while a scan runs and for 5 s after it; the
+log counts how many were blocked.
+
+**Stuck after a scan (fixed, re-test):** every trial reaching the end wall started GD's end animation
+(timed actions ending in `levelComplete`). After the scan the leftovers completed the level 6 times at
+tick 0, leaving GD in its completed state (no pause/exit, icon passes the end wall); the 5 s end-screen
+block made it worse. Now `playEndAnimationToPos` is skipped during a scan and counts as completing the
+level; the end text/effect/screen are blocked only while the scan runs.
+**Resting points with the settled rule:** still 3. Grounded 882, not holding/dashing 511, same state as
+the step before only 50; ground yVel values 0 x202, -8 x13, then single values. The survey now logs which
+value changed between consecutive grounded steps.
+
+**Stereo Madness scan (324 inputs, settled-state rule, end-animation fix):** 73 resting points, 0
+unmeasured, 7,084 trials (2,034 exact, 3,085 chained, 361 survived-only, 1,604 died) in 353.6 s
+(27,667 ticks/s); 199 end animations blocked, no stuck state afterwards. The resting rule works; "ship"
+just has few real resting spots. Between grounded steps the value that changed was almost always y
+(2,653x), i.e. GD's on-ground flag stays set on some steps where y moves. Cube releases: 20/20 (all
+exact, release timing doesn't matter in the air); cube presses: up to 20 early / 2 late, chained (the
+press's own release comes before the landing). Ship section (25-27 s, 79-80 s): 1-3 frame windows.
+106 inputs have a gap flag, mostly in ship sections (a later frame rejoins the run after an earlier
+one failed).
+
+**Window scan v2: exact reconvergence (superseded by v3).** Replaces "alive 0.25 s past
+the next input". A frame is valid when the run comes back to exactly the recorded run: identical
+`ExactState` (both players: x, y, rotation, x/y velocity, size, speed, ground, gravity, gamemode, dash,
+jump buffer, orb state, slope, held button, touched orbs) for 8 steps in a row, and the same level
+interactions (orbs, pads, pickups in the same order; touch triggers at the same tick; logged by hooks
+on `playerTouchedRing`, `bumpPlayer`, `playerTouchedTrigger`, `pickupItem`). Exact = back before the
+next input; chained = within the next 3 inputs at their recorded ticks; survived-only and deaths fail.
+Per checkpoint group: Advance, then **Reference** (keep playing unbroken, record state + interactions
+every step), then **Verify** (respawn, replay unmodified, must match every step, else the group is
+UNMEASURED), then trials. Each side scans outward to the first failure, then probes 4 more frames for
+holes (gap flags). One physics step per frame throughout (results are for 240 FPS play). Results:
+early/late plus exact counts (GDR2 extension v5; v4 survival windows are ignored on load). After a
+scan or abort the level restarts from the start (fixes the stuck-past-the-end-wall bug).
+
+Earlier design (survival-based, replaced): For each click of the macro, find its real window by
 simulation: fast-forward the macro (Seek), place one GD checkpoint shortly before the click (not
 inside a hold), then for each candidate frame respawn there and play the macro with only that click
 moved. Scan outward from the recorded frame (p-1, p-2, ... until the first failure; same for later
