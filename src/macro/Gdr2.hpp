@@ -25,7 +25,9 @@
 // Frames: GDR2 counts physics steps (240/s). Our ticks (m_currentProgress) count half-steps, so
 // file frame = tick / 2. With Click Between Steps forced off every tick is even.
 //
-// DynamicButter replay extension (version 1): extVersion, endTick, recordedAt (unix s).
+// DynamicButter replay extension: extVersion, endTick, recordedAt (unix s); version 2 adds
+// start ticks (count + delta-encoded ticks, M8 seek points); version 3 adds the x path (count +
+// (tick delta, x float) corner points, for level start positions).
 // Other readers skip it by its size prefix.
 
 namespace db::gdr2 {

@@ -145,6 +145,10 @@ namespace db::store {
 		return Ok(path);
 	}
 
+	Result<> overwrite(std::string const& path, Macro const& macro) {
+		return writeMacro(path, macro);
+	}
+
 	std::optional<Entry> latestFor(int levelID, std::string const& levelName) {
 		for (auto& e : list()) {
 			if (e.macro.isFor(levelID, levelName)) return std::move(e);

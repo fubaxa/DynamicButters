@@ -4,6 +4,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 class PlayerObject;
 class PlayLayer;
@@ -21,8 +22,10 @@ namespace db {
 		static MacroManager& get();
 
 		MacroMode mode() const { return m_mode; }
-		bool isRecording() const { return m_mode == MacroMode::Record; }
-		bool isPlaying() const { return m_mode == MacroMode::Playback && m_play.has_value(); }
+		// A seek (M8) plays the macro whatever the mode is, and nothing is recorded while it runs.
+		bool isRecording() const { return m_mode == MacroMode::Record && !m_seeking; }
+		bool isPlaying() const { return m_play.has_value() && (m_mode == MacroMode::Playback || m_seeking); }
+		bool isSeeking() const { return m_seeking; }
 		Macro const& macro() const { return m_macro; }
 
 		// --- pause-menu popup ---
@@ -37,6 +40,21 @@ namespace db {
 		std::string const& playSource() const { return m_playSource; }
 		std::string const& lastSaved() const { return m_lastSaved; }
 		bool hasPendingChange() const { return m_reloadPending || pendingMode() != m_mode; }
+
+		// --- macro start positions (M8) ---
+		// Loads the macro to play (selected file, this session's recording, or the newest file for
+		// the level) if it isn't loaded yet. False if there is none.
+		bool ensurePlayMacro();
+		// Start positions of the loaded macro; edits are saved to its file right away.
+		std::vector<uint32_t> const* startTicks() const { return m_play ? &m_play->startTicks : nullptr; }
+		void addStartTick(uint32_t tick);
+		void removeStartTick(uint32_t tick);
+		void clearStartTicks();
+		// Seek: macro playback runs regardless of mode; recording pauses.
+		void beginSeek();
+		// Seek reached `tick`. In Record mode the recording continues from there, starting with the
+		// macro's inputs up to `tick`.
+		void endSeek(bool reached, uint32_t tick);
 
 		// True while the mod needs vanilla Click Between Steps off (recording, playback),
 		// or when the debug setting asks for it.
@@ -71,6 +89,9 @@ namespace db {
 		void loadPlayback();
 		void recomputeHeld();
 		void saveRecording();
+		void saveStartTicks();
+		bool m_seeking = false;
+		std::string m_playPath; // file m_play was loaded from / saved to (empty: not saved)
 		void logPlaybackSummary(char const* reason);
 
 		MacroMode m_mode = MacroMode::Off;
@@ -93,6 +114,7 @@ namespace db {
 		// last completed recording this session, so Playback works right after recording even if saving failed
 		std::optional<Macro> m_lastRecording;
 		std::string m_lastSaved; // file name of the last saved recording
+		std::string m_lastSavedPath;
 
 		std::string m_selectedPath; // picked in the popup; empty = newest recording of the level
 		bool m_reloadPending = false;
@@ -103,6 +125,20 @@ namespace db {
 		size_t m_cursor = 0;
 		bool m_playHeld[2] = {false, false};
 		bool m_dispatching = false;
+
+		// Level start positions (StartPosObject): the attempt starts mid-level, so the macro is
+		// shifted to the tick where the recorded run passed the spawn x. macro tick = game tick + offset.
+		int64_t m_tickOffset = 0;
+		bool m_startPosAttempt = false;        // this attempt began at a level start position
+		bool m_startPress[2] = {false, false}; // macro holds these keys at the start position: press at once
+		std::optional<uint32_t> macroTickAtX(float x) const; // fallback for macros without a path
+		void setupStartPos(PlayLayer* pl, uint32_t tick);
+
+		// The run's x path (PathTrack.hpp): built while recording, and while playing from the start
+		// (a macro without a path learns it when such a playback completes).
+		PathBuilder m_pathBuilder;
+		bool tracksPath() const;
+
 		struct PlayStats {
 			uint32_t dispatched = 0;
 			uint32_t late = 0;

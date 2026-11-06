@@ -7,6 +7,7 @@
 #include "debug/RespawnProbe.hpp"
 #include "macro/MacroManager.hpp"
 #include "debug/CheckpointTester.hpp"
+#include "debug/SpeedProbe.hpp"
 #include "physics/PlayerState.hpp"
 #include "physics/PreciseCheckpoints.hpp"
 
@@ -123,6 +124,7 @@ class $modify(DBBaseGameLayer, GJBaseGameLayer) {
 		auto pl = static_cast<PlayLayer*>(static_cast<GJBaseGameLayer*>(this));
 		db::MacroManager::get().onStepEnd(after, m_player1);
 		db::checkpoints::onStepEnd(pl);
+		db::speedprobe::onStepEnd(pl, after);
 		db::cptest::onStepEnd(pl);
 
 		if (db::debug::probeAtTick != 0 && after >= db::debug::probeAtTick) {

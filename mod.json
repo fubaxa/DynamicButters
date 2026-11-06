@@ -15,6 +15,12 @@
 			"name": "Safe mode",
 			"description": "An attempt that used macro playback or a speedhack other than 1.0x doesn't save progress: no new best, completion, stars, orbs, coins or leaderboard entry. Turn off at your own risk."
 		},
+		"smart-startpos": {
+			"type": "bool",
+			"default": true,
+			"name": "SmartStartPos",
+			"description": "Start positions take their speed, gamemode, size, gravity, dual and mirror from the last portals before them. Speed portals with preview turned off are ignored; a portal the start position is inside isn't forced (it applies itself on spawn)."
+		},
 		"macro-mode": {
 			"type": "string",
 			"default": "Off",

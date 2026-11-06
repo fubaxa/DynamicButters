@@ -2,6 +2,9 @@
 #include <Geode/modify/CCScheduler.hpp>
 
 #include "safety/SafeMode.hpp"
+#include "macro/Seek.hpp"
+
+#include <chrono>
 
 using namespace geode::prelude;
 
@@ -29,10 +32,27 @@ namespace {
 
 class $modify(DBScheduler, CCScheduler) {
 	void update(float dt) {
+		if (db::seek::wantsFastForward()) {
+			fastForward();
+			return;
+		}
 		float speed = db::safe::speedhackFactor();
 		bool inLevel = PlayLayer::get() != nullptr;
 		float effective = inLevel ? speed : 1.f;
 		setMusicPitch(effective);
 		CCScheduler::update(dt * effective);
+	}
+
+	// Seek (M8): many virtual 240-FPS frames per rendered frame, each a full game update.
+	void fastForward() {
+		setMusicPitch(1.f);
+		auto start = std::chrono::steady_clock::now();
+		auto budget = std::chrono::milliseconds(db::seek::BUDGET_MS);
+		unsigned frames = 0;
+		while (db::seek::wantsFastForward()) {
+			CCScheduler::update(db::seek::VIRTUAL_FRAME_DT);
+			db::seek::afterVirtualFrame();
+			if (++frames % 8 == 0 && std::chrono::steady_clock::now() - start >= budget) break;
+		}
 	}
 };

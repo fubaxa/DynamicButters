@@ -24,6 +24,8 @@ namespace db::store {
 	geode::Result<Macro> load(std::string const& path);
 	// Saves as "<level name>.gdr2", or "<level name> (2).gdr2" etc. if taken. Returns the path.
 	geode::Result<std::string> save(Macro const& macro);
+	// Overwrites an existing macro file (e.g. after editing its start positions).
+	geode::Result<> overwrite(std::string const& path, Macro const& macro);
 	// Newest file recorded on this level (by ID, and by name for local levels, which all have ID 0).
 	std::optional<Entry> latestFor(int levelID, std::string const& levelName);
 

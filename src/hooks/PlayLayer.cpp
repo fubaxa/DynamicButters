@@ -7,9 +7,12 @@
 #include "debug/RespawnProbe.hpp"
 #include "macro/MacroManager.hpp"
 #include "debug/CheckpointTester.hpp"
+#include "debug/SpeedProbe.hpp"
 #include "physics/PreciseCheckpoints.hpp"
 #include "physics/PlayerState.hpp"
 #include "safety/SafeMode.hpp"
+#include "macro/Seek.hpp"
+#include "macro/SmartStartPos.hpp"
 
 using namespace geode::prelude;
 
@@ -67,6 +70,7 @@ class $modify(DBPlayLayer, PlayLayer) {
 
 	void postUpdate(float dt) {
 		PlayLayer::postUpdate(dt);
+		db::seek::onFrameEnd(this);
 		db::cptest::onFrameEnd(this);
 		applySafeMode();
 		if (auto safe = m_fields->safeLabel) {
@@ -91,6 +95,7 @@ class $modify(DBPlayLayer, PlayLayer) {
 
 	void resetLevel() {
 		unsigned before = m_gameState.m_currentProgress;
+		db::smartstartpos::apply(this);
 		PlayLayer::resetLevel();
 		m_fields->endTick.reset();
 		unsigned now = m_gameState.m_currentProgress;
@@ -106,6 +111,7 @@ class $modify(DBPlayLayer, PlayLayer) {
 		db::debug::probeAtTick = now + db::debug::PROBE_DELAY;
 		db::MacroManager::get().onAttemptStart(this, now, m_isPracticeMode);
 		db::safe::onAttemptStart(now);
+		db::speedprobe::onAttemptStart(this, now);
 		applySafeMode();
 		db::cptest::onAttemptStart(this, now);
 	}
@@ -115,6 +121,7 @@ class $modify(DBPlayLayer, PlayLayer) {
 		m_fields->endTick = tick;
 		db::MacroManager::get().onLevelComplete(this, tick);
 		db::cptest::logSummary("level complete");
+		db::seek::abort("the level ended before the start position");
 		applySafeMode();
 		if (db::safe::blocking()) log::info("safe-mode: level complete not saved ({})", db::safe::reason());
 		PlayLayer::levelComplete();
@@ -124,6 +131,7 @@ class $modify(DBPlayLayer, PlayLayer) {
 	void destroyPlayer(PlayerObject* player, GameObject* object) {
 		applySafeMode();
 		PlayLayer::destroyPlayer(player, object);
+		if (player && player->m_isDead) db::seek::onPlayerDied();
 	}
 
 	// Safe mode uses test mode, GD's own "don't save progress" state (start positions use it). It
@@ -141,6 +149,7 @@ class $modify(DBPlayLayer, PlayLayer) {
 	void onQuit() {
 		db::MacroManager::get().onQuit();
 		db::cptest::logSummary("left the level");
+		db::seek::abort("left the level");
 		PlayLayer::onQuit();
 	}
 

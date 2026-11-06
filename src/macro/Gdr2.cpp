@@ -11,7 +11,7 @@ namespace db::gdr2 {
 	namespace {
 		constexpr int FORMAT_VERSION = 2;
 		constexpr int GAME_VERSION = 22091;
-		constexpr uint64_t EXT_VERSION = 1;
+		constexpr uint64_t EXT_VERSION = 3; // 2: + start ticks, 3: + x path
 		constexpr char const* PHYS_TAG = "Phys";
 		constexpr uint64_t MAX_STRING = 0xFFFF; // same limit as the reference reader
 
@@ -130,6 +130,17 @@ namespace db::gdr2 {
 		ext.varint(EXT_VERSION);
 		ext.varint(macro.endFrame);
 		ext.varint(static_cast<uint64_t>(std::max<int64_t>(macro.recordedAt, 0)));
+		ext.varint(macro.startTicks.size());
+		uint64_t prevStart = 0;
+		for (auto t : macro.startTicks) { ext.varint(t - prevStart); prevStart = t; }
+		// v3: path corner points (tick delta, x as float)
+		ext.varint(macro.path.size());
+		uint64_t prevPathTick = 0;
+		for (auto const& p : macro.path) {
+			ext.varint(p.tick - prevPathTick);
+			ext.raw<float>(p.x);
+			prevPathTick = p.tick;
+		}
 		w.block(ext);
 
 		w.varint(0); // deaths
@@ -190,9 +201,29 @@ namespace db::gdr2 {
 
 		auto ext = r.block();
 		if (m.botName == BOT_NAME) {
-			if (ext.varint() >= 1) {
+			auto extVersion = ext.varint();
+			if (extVersion >= 1) {
 				m.endFrame = static_cast<uint32_t>(ext.varint());
 				m.recordedAt = static_cast<int64_t>(ext.varint());
+			}
+			if (extVersion >= 2) {
+				auto count = ext.varint();
+				uint64_t t = 0;
+				for (uint64_t i = 0; i < count && ext.ok(); ++i) {
+					t += ext.varint();
+					m.startTicks.push_back(static_cast<uint32_t>(t));
+				}
+				if (!ext.ok()) m.startTicks.clear();
+			}
+			if (extVersion >= 3) {
+				auto count = ext.varint();
+				uint64_t t = 0;
+				for (uint64_t i = 0; i < count && ext.ok(); ++i) {
+					t += ext.varint();
+					float x = ext.raw<float>();
+					m.path.push_back({static_cast<uint32_t>(t), x});
+				}
+				if (!ext.ok()) m.path.clear();
 			}
 		}
 

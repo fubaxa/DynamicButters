@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "macro/PathTrack.hpp"
+
 namespace db {
 	// Player state at the moment an input is applied. Matches GDR2's standard "Phys" extension
 	// (xPos, yPos, rotation as float; xVel, yVel as double), so other bots can read it later.
@@ -33,6 +35,33 @@ namespace db {
 		std::string botName = "DynamicButter"; // bot that recorded it (from the file when loaded)
 		int64_t recordedAt = 0;       // unix seconds; 0 = unknown (files from other bots)
 		std::vector<MacroInput> inputs; // sorted by frame, P1 and P2 keys interleaved
+		std::vector<uint32_t> startTicks; // macro start positions (M8), sorted
+		std::vector<PathPoint> path;      // the run's x over time (corner points), for level start positions
+
+		// Whether the macro holds a key at the end of `tick` (after inputs at exactly `tick`).
+		bool heldAt(uint32_t tick) const {
+			bool held[2] = {false, false};
+			for (auto const& in : inputs) {
+				if (in.frame > tick) break;
+				held[in.player2 ? 1 : 0] = in.down;
+			}
+			return held[0] || held[1];
+		}
+		// Latest tick <= `tick` at which no key is held: a respawn mid-hold isn't reproducible
+		// (GD releases the player 2 ticks after every respawn), so start positions avoid holds.
+		uint32_t latestFreeTick(uint32_t tick) const {
+			while (tick > 0 && heldAt(tick)) {
+				// Step back to just before the press that started this hold.
+				uint32_t press = 0;
+				for (auto const& in : inputs) {
+					if (in.frame > tick) break;
+					if (in.down) press = in.frame;
+				}
+				tick = press >= 2 ? press - 2 : 0;
+			}
+			return tick;
+		}
+		uint32_t lastInputFrame() const { return inputs.empty() ? 0 : inputs.back().frame; }
 
 		// Local/editor levels all have ID 0, so those are told apart by name.
 		bool isFor(int id, std::string const& name) const {
@@ -41,6 +70,7 @@ namespace db {
 
 		void clear() {
 			inputs.clear();
+			path.clear();
 			endFrame = 0;
 		}
 	};

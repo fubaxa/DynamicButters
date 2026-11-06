@@ -13,6 +13,7 @@
 #include "macro/MacroManager.hpp"
 #include "macro/MacroStore.hpp"
 #include "safety/SafeMode.hpp"
+#include "macro/Seek.hpp"
 
 using namespace geode::prelude;
 
@@ -217,6 +218,162 @@ namespace db::ui {
 		}
 	};
 
+	// ------------------------------------------------------------ macro start positions (M8)
+
+	class StartPosPopup : public DBPopup {
+	public:
+		static StartPosPopup* create(geode::Function<void()> closeParent) {
+			auto ret = new StartPosPopup();
+			ret->m_closeParent = std::move(closeParent);
+			if (ret->initStartPos()) {
+				ret->autorelease();
+				return ret;
+			}
+			delete ret;
+			return nullptr;
+		}
+
+	protected:
+		geode::Function<void()> m_closeParent;
+		CCNode* m_listHolder = nullptr;
+		CCLabelBMFont* m_info = nullptr;
+		static constexpr float W = 400.f, H = 280.f, LIST_W = 360.f, LIST_H = 150.f, ROW_H = 26.f;
+		static constexpr uint32_t TICKS_PER_SECOND = 480;
+
+		bool initStartPos() {
+			if (!initPopup(W, H, "Seek points")) return false;
+			auto& mgr = MacroManager::get();
+			mgr.ensurePlayMacro();
+
+			m_info = label("", "chatFont.fnt", 0.6f);
+			m_info->setAlignment(kCCTextAlignmentCenter);
+			m_mainLayer->addChildAtPosition(m_info, Anchor::Top, {0.f, -45.f});
+
+			m_listHolder = CCNode::create();
+			m_mainLayer->addChild(m_listHolder);
+
+			std::vector<CCNode*> row;
+			auto addBtn = [&](char const* text, char const* bg, auto cb) {
+				auto btn = CCMenuItemExt::createSpriteExtra(
+					ButtonSprite::create(text, "bigFont.fnt", bg, 0.5f), std::move(cb));
+				m_buttonMenu->addChild(btn);
+				row.push_back(btn);
+			};
+			addBtn("Add current", "GJ_button_01.png", [this](CCMenuItemSpriteExtra*) { this->onAddCurrent(); });
+			addBtn("Every 10 s", "GJ_button_04.png", [this](CCMenuItemSpriteExtra*) { this->onEvery(10); });
+			addBtn("Clear", "GJ_button_06.png", [this](CCMenuItemSpriteExtra*) {
+				MacroManager::get().clearStartTicks();
+				this->rebuild();
+			});
+			// Same layout as the main popup's rows: centred, even gaps.
+			float total = 0.f;
+			for (auto n : row) total += n->getScaledContentSize().width;
+			total += 10.f * (row.size() - 1);
+			float x = (W - total) / 2.f;
+			for (auto n : row) {
+				float w = n->getScaledContentSize().width;
+				n->setPosition({x + w / 2.f, 25.f});
+				x += w + 10.f;
+			}
+
+			rebuild();
+			return true;
+		}
+
+		void onAddCurrent() {
+			auto& mgr = MacroManager::get();
+			auto pl = PlayLayer::get();
+			if (!pl || !mgr.playMacro()) return;
+			uint32_t tick = pl->m_gameState.m_currentProgress;
+			uint32_t free = mgr.playMacro()->latestFreeTick(tick);
+			if (free == 0) {
+				Notification::create("Can't add a seek point at the very start", NotificationIcon::Warning)->show();
+				return;
+			}
+			if (free != tick) {
+				Notification::create(fmt::format("Moved to tick {} (before a held click)", free), NotificationIcon::Info)->show();
+			}
+			mgr.addStartTick(free);
+			rebuild();
+		}
+
+		void onEvery(unsigned secondsApart) {
+			auto& mgr = MacroManager::get();
+			auto const& play = mgr.playMacro();
+			if (!play) return;
+			uint32_t end = play->endFrame ? play->endFrame : play->lastInputFrame();
+			for (uint32_t t = secondsApart * TICKS_PER_SECOND; t < end; t += secondsApart * TICKS_PER_SECOND) {
+				if (uint32_t free = play->latestFreeTick(t); free > 0) mgr.addStartTick(free);
+			}
+			rebuild();
+		}
+
+		void rebuild() {
+			m_listHolder->removeAllChildren();
+			auto& mgr = MacroManager::get();
+			auto const& play = mgr.playMacro();
+			if (!play) {
+				m_info->setString("No macro for this level.\nRecord one, or pick one with Load.");
+				return;
+			}
+			m_info->setString(fmt::format("{} ({} inputs)\nGo: restarts in practice mode, fast-forwards the macro\nand starts you at that point.",
+				mgr.playSource(), play->inputs.size()).c_str());
+			limitNodeWidth(m_info, W - 30.f, 0.6f, 0.2f);
+
+			auto scroll = ScrollLayer::create({LIST_W, LIST_H});
+			scroll->m_contentLayer->setLayout(ScrollLayer::createDefaultListLayout(2.f));
+			auto const& ticks = play->startTicks;
+			for (size_t i = 0; i < ticks.size(); ++i) {
+				uint32_t tick = ticks[i];
+				auto row = CCNode::create();
+				row->setContentSize({LIST_W, ROW_H});
+				row->addChild(CCLayerColor::create({0, 0, 0, 70}, LIST_W, ROW_H));
+
+				auto text = label(fmt::format("#{}   {:.2f} s   (tick {})", i + 1, tick / double(TICKS_PER_SECOND), tick),
+					"bigFont.fnt", 0.35f);
+				text->setAnchorPoint({0.f, 0.5f});
+				text->setPosition({8.f, ROW_H / 2.f});
+				row->addChild(text);
+
+				auto menu = CCMenu::create();
+				menu->ignoreAnchorPointForPosition(false);
+				menu->setContentSize({LIST_W, ROW_H});
+				menu->setPosition({LIST_W / 2.f, ROW_H / 2.f});
+				auto go = CCMenuItemExt::createSpriteExtra(
+					ButtonSprite::create("Go", "bigFont.fnt", "GJ_button_01.png", 0.45f),
+					[this, tick](CCMenuItemSpriteExtra*) {
+						if (!seek::start(tick)) return;
+						if (m_closeParent) m_closeParent();
+						this->onClose(nullptr);
+					});
+				go->setPosition({LIST_W - 75.f, ROW_H / 2.f});
+				menu->addChild(go);
+				auto del = CCMenuItemExt::createSpriteExtra(
+					ButtonSprite::create("X", "bigFont.fnt", "GJ_button_06.png", 0.45f),
+					[this, tick](CCMenuItemSpriteExtra*) {
+						MacroManager::get().removeStartTick(tick);
+						this->rebuild();
+					});
+				del->setPosition({LIST_W - 25.f, ROW_H / 2.f});
+				menu->addChild(del);
+				row->addChild(menu);
+				scroll->m_contentLayer->addChild(row);
+			}
+			scroll->m_contentLayer->updateLayout();
+			scroll->scrollToTop();
+			scroll->setPosition({(W - LIST_W) / 2.f, 48.f});
+			m_listHolder->addChild(scroll);
+
+			if (ticks.empty()) {
+				auto empty = label("No seek points yet.\nPause where you want one and press Add current,\nor add one every 10 seconds.",
+					"chatFont.fnt", 0.6f);
+				empty->setAlignment(kCCTextAlignmentCenter);
+				empty->setPosition({W / 2.f, 48.f + LIST_H / 2.f});
+				m_listHolder->addChild(empty);
+			}
+		}
+	};
+
 	// ------------------------------------------------------------ main popup
 
 	class MacroPopup : public DBPopup {
@@ -274,7 +431,7 @@ namespace db::ui {
 		}
 
 		bool initMain() {
-			constexpr float W = 380.f, H = 280.f;
+			constexpr float W = 430.f, H = 280.f;
 			if (!initPopup(W, H, "DynamicButter")) return false;
 
 			// Mode row: label + three buttons, evenly spaced
@@ -334,7 +491,7 @@ namespace db::ui {
 			// Bottom row
 			auto addBtn = [this](char const* text, char const* bg, auto cb) {
 				auto btn = CCMenuItemExt::createSpriteExtra(
-					ButtonSprite::create(text, "bigFont.fnt", bg, 0.55f), std::move(cb));
+					ButtonSprite::create(text, "bigFont.fnt", bg, 0.5f), std::move(cb));
 				m_buttonMenu->addChild(btn);
 				m_bottomRow.push_back(btn);
 				return btn;
@@ -350,6 +507,9 @@ namespace db::ui {
 				auto dir = store::macrosDir();
 				(void)file::createDirectoryAll(dir);
 				file::openFolder(dir);
+			});
+			addBtn("Seek", "GJ_button_02.png", [this](CCMenuItemSpriteExtra*) {
+				StartPosPopup::create([this] { this->onClose(nullptr); })->show();
 			});
 			addBtn("Settings", "GJ_button_04.png", [](CCMenuItemSpriteExtra*) {
 				openSettingsPopup(Mod::get());
@@ -413,7 +573,7 @@ namespace db::ui {
 				text += "\nThe macro is saved when you complete the level.";
 			}
 			m_status->setString(text.c_str());
-			limitNodeSize(m_status, {340.f, 100.f}, 0.7f, 0.3f);
+			limitNodeSize(m_status, {390.f, 100.f}, 0.7f, 0.3f);
 		}
 	};
 

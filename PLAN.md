@@ -297,12 +297,21 @@ player takes over (Dynamic, M9) or playback continues to the end (M8's "done whe
 | M5 ✅ | Practice-mode recording. Verified: Eclypse challenge 4 recorded in practice mode, played back to 100% in normal mode (4 runs; see Open issues for the drift seen in 2 of them). Built: cut-back on respawn (inputs after the checkpoint tick removed). Found from the logs: after every practice respawn at tick T, GD sends its own release (P1 key) at T+2, so a re-press isn't needed; instead the recording must *end* a hold that was active at the checkpoint. For each held key a release is added at T+2, using the player state when GD's release arrives (fallback: respawn state). This fixes holds on the P2 key, whose release GD's P1-key release didn't cover | Practice-recorded macro (with deaths, including deaths mid-hold) replays to 100% in normal mode with physics correction off |
 | M6 ✅ | GDR2 save/load + pause-menu UI. Built: own GDR2 reader/writer (`macro/Gdr2.cpp`, matches the reference library byte for byte: LEB128 varints, big-endian float/double, "Phys" input tag, P1 then P2 lists). File frame = tick / 2 (GDR2 counts 240/s steps); files with another framerate are scaled with a warning; platformer left/right inputs are dropped. Our replay extension: endTick + recordedAt. Files live in `<save dir>/macros/`, named after the level (`Name (2).gdr2` if taken), saved automatically on level complete. Playback picks: the file chosen in the popup, else this session's recording, else the newest file for the level (matched by ID, and by name for ID 0 levels, which fixes the local-level clash). The old text dumps are converted once at startup (`imported_<id>_<time>.gdr2`). The pause "DB" button opens the DynamicButter popup: mode (Off/Record/Playback, stored in the `macro-mode` setting), status, Load (file list, this level's macros first), Auto, Folder, Settings | Round-trip works; a `.gdr2` from another bot plays back |
 | M7 ✅ | Safe mode + settings. Built (`safety/SafeMode.cpp`): an attempt is unsafe once playback is active or the speedhack runs at anything but 1.0x (checked at attempt start, every frame, on death and on completion; practice respawns keep the flag, a restart from 0 clears it; `markUnsafe()` is ready for Dynamic/seek). While unsafe and `safe-mode` is on (default), `PlayLayer::m_isTestMode` (GD's own no-saving state, used by start positions) is held on for the rest of the attempt, so death (new best %) and level complete (completion, rewards, leaderboard) don't save; GD's original value comes back on a clean attempt. In-game label "Safe mode: <reason>" under the tick counter, and a line in the popup. Also: speedhack now pitches FMOD's master channel group, so the song speeds up with the sound effects | Playback completion doesn't save progress; setting turns it off |
-| M8 🔧 in progress | Seek / macro start positions, in three steps (design in §6, "M8 design"). **M8a ✅** frame-rate independence: physics is identical however steps are grouped into frames; the speedhack "drift" was a measurement artifact on the 2nd step of 2-step frames, now skipped (and never corrected). **M8b** fast-forward: run the macro many steps per frame (speedhack-style, audio muted) with the same result as real time. **M8c** macro start positions: seek in practice mode and place GD's own (exact) checkpoints at the chosen ticks; start from one | Start from a snapshot, play the macro the rest of the way, beat the level |
+| M8 🔧 in progress | Seek / macro start positions, in three steps (design in §6, "M8 design"). **M8a ✅** frame-rate independence: physics is identical however steps are grouped into frames; the speedhack "drift" was a measurement artifact on the 2nd step of 2-step frames, now skipped (and never corrected). **M8b 🔧 built** fast-forward (`macro/Seek.cpp` + scheduler hook): each rendered frame runs virtual 240-FPS frames (full `CCScheduler::update(1/240)`, one physics step each) for up to 14 ms; master volume muted; stops on death, level end, quit or a stall. **M8d 🔧 built: level start positions (the actual goal, clarified by the user)**: the macro plays from the StartPosObjects already placed in the level. First try (interpolating between the two recorded inputs around the spawn, then snapping at the first input) was off by 48-211 ticks where speed changed between sparse inputs, and the snap warped the player 1-2 s in. **Now:** the start position is trusted to put the player in the real run's state (user's call: they're placed where the player is stable). Macros store the run's **x path** (corner points where horizontal speed changes; x is exactly linear between them; GDR2 extension v3), built while recording and learned by a complete playback from the start for older macros. At a start position the exact tick the run passed the spawn x comes from the path, x is nudged (< 1 step) to the run's x at that tick, a held click is pressed after GD's own spawn release, and nothing is snapped. Without a path it falls back to the old estimate with a warning. Logged as `startpos:`. Limit: triggers that ran before the start position aren't replayed by GD. **M8c 🔧 built (renamed "Seek points" in the UI)** macro-defined start positions: ticks stored in the macro (GDR2 extension v2, saved to the file on every edit); "Start pos" popup: Add current (paused tick), Every 10 s, Clear, per-row Go / X; a tick inside a hold moves back to just before the press. Go: close pause menu, practice mode on, remove checkpoints, restart from the start, fast-forward the macro, `markCheckpoint()` at each start position up to the target (end of frame), then `resetLevel()` so the start is a normal respawn. After that: Playback continues the macro, Record continues the recording (seeded with the macro's inputs up to there), Off hands control to the player | Start from a snapshot, play the macro the rest of the way, beat the level |
 | M9 | Dynamic hook-in point | Scheduler takes "delay this user input to tick X" |
 
 ---
 
 ## 10. Dynamic preview (not built now)
+
+**Next step (agreed after M8): window scan.** For each click of the macro, find its real window by
+simulation: fast-forward the macro (Seek), place one GD checkpoint shortly before the click (not
+inside a hold), then for each candidate frame respawn there and play the macro with only that click
+moved. Scan outward from the recorded frame (p-1, p-2, ... until the first failure; same for later
+frames) rather than binary search, because pass/fail over frames isn't guaranteed to be monotonic.
+Proposed pass criterion: the player survives until shortly after the next input. Releases get their
+own windows. Results go in the replay extension as per-input (earliest, latest).
+
 
 - `leniency = N` frames. A user press at tick `f` is matched to the next unused macro press `p` with
   `p − N ≤ f ≤ p`. On a match the click is held and fired at `p`; otherwise it goes through unchanged.
@@ -335,6 +344,29 @@ player takes over (Dynamic, M9) or playback continues to the end (M8's "done whe
   The Eclypse challenge 4 drift (dx/dy=2.4 at tick 694 in 2 of 4 playbacks), first blamed on the
   random seed, is probably the same bug (that recording had a checkpoint at tick 204 with dx=1.61).
   Re-record it and play with correction off to confirm; look at the seed only if it still drifts.
+- **Level start positions: playback from them still dies (partially unresolved, parked).** Built
+  (M8d): exact tick from the macro's x path, x nudge, held click re-pressed, SmartStartPos. Tested on
+  "BOTS phase 4": the tick mapping is exact, SmartStartPos fixes wrong start position gamemodes
+  (e.g. x=50977 mode 0->1), but runs still drift and die within 0.1-2 s. Findings from the speed probe:
+  - **Speed portals trigger on hitbox overlap, not the player's centre** (user's theory, confirmed):
+    at each switch the player's hitbox right edge had just entered the portal's hitbox (47151.2 vs
+    47149.5, 47278.65 vs 47278.5, 47397.96 vs 47397.5: overlap < 1 step), and vertical overlap is
+    needed too (the 3x portal at x=43245 triggered when the y ranges started to overlap).
+  - **One step late:** from a start position the 1x portal at x=52845 switched at macro tick 69648,
+    the recorded run at 69646, at the same x (52822.188). Probably the first step after a spawn
+    doesn't move the player (as seen with checkpoints in M6), so the offset should likely be one
+    step (2 ticks) smaller. Not changed yet.
+  - **The deaths come from y, not timing:** e.g. x=47513 (cube) is dy=8.8 off 47 ticks after the
+    spawn; x=40989 (ship) dy=8.7 after 16 ticks. The start position spawns with yVel 0 / its own y,
+    so it isn't in the state of the real run unless it's placed where the player is resting. Fixing
+    that needs the run's y state at that point (not stored; the path only has x), or placing a GD
+    checkpoint via Seek instead.
+  - GD reuses the first spawn's state for later attempts at the same start position (the x nudge
+    carried over); the lookup now uses the start position object's x.
+- **Seek (M8b/M8c) has not been tested in-game yet.** Fast-forward speed is unknown; it's needed
+  for the Dynamic window scan (§10).
+- **SmartStartPos** changes the start position's settings in memory for the session; it isn't
+  undone when the setting is turned off mid-level (restart the level).
 - ~~Playback at a speedhack other than 1.0x drifts a little~~ **Resolved in M8a: not real drift.** (Original note:) At 1.00x playback
   is exact (Supersonic 472 inputs, ship 94 inputs: 0 drift with correction off). At 1.25x: Supersonic
   dx=1.95 at tick 22686, ship dx=2.4 at tick 8704/10208. Physics correction snaps it back, so the runs
