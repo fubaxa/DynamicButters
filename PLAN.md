@@ -240,7 +240,7 @@ when triggers and objects are dense.
 | M4 ✅ | Precise checkpoints. **Result: on Stereo Madness GD's own checkpoints are already exact**: 31/31 tests EXACT with precise checkpoints OFF, 33/33 with ON (respawn state and the next 120 steps identical). The +1.298 x offset seen in M1 came from the old log reading the state mid-step, not from GD. Precise checkpoints stay as a safety net for levels and gamemodes not tested yet. Known issue (debug only): the test keeps running after the level is complete. Built: `PlayerState` snapshot taken at the end of the step a checkpoint is created in (stored on `CheckpointObject` via `$modify` fields), compared against GD's respawn and restored when `precise-checkpoints` is on. Plus an automatic test (`checkpoint-test`): during practice-mode playback, every 2.5 s it places a checkpoint, records 0.5 s of the original run, respawns, and compares the replay tick by tick | Checkpoint test reports EXACT for every test with precise checkpoints on (and shows whether GD alone is exact with it off) |
 | ➕ Speedhack ✅ | `speedhack` setting (0.1–2.0): scales `CCScheduler::update`'s dt and the music pitch while a level is open | Verified: record and playback at different speeds both worked |
 | ➕ Pause fix ⏸ deferred | Pausing during a macro hold breaks the hold. See "Open issues" at the end | — |
-| M5 | Practice-mode recording (cut-back + re-press) | Practice-recorded macro replays in normal mode |
+| M5 ✅ | Practice-mode recording. Verified: Eclypse challenge 4 recorded in practice mode, played back to 100% in normal mode (4 runs; see Open issues for the drift seen in 2 of them). Built: cut-back on respawn (inputs after the checkpoint tick removed). Found from the logs: after every practice respawn at tick T, GD sends its own release (P1 key) at T+2, so a re-press isn't needed; instead the recording must *end* a hold that was active at the checkpoint. For each held key a release is added at T+2, using the player state when GD's release arrives (fallback: respawn state). This fixes holds on the P2 key, whose release GD's P1-key release didn't cover | Practice-recorded macro (with deaths, including deaths mid-hold) replays to 100% in normal mode with physics correction off |
 | M6 | GDR2 save/load + pause-menu UI | Round-trip works; a `.gdr2` from another bot plays back |
 | M7 | Safe mode + settings | Playback completion doesn't save progress; setting turns it off |
 | M8 | Seek / macro start positions | Start from a snapshot, play the macro the rest of the way, beat the level |
@@ -274,3 +274,12 @@ when triggers and objects are dense.
   - Recording is affected the same way: a pause mid-hold cuts the hold in-game but not in the recording.
   - `PlayerObject.cpp` keeps a debug log of the calls for when this is picked up.
 - **Checkpoint test keeps running after the level is complete** (debug tool only, not fixed on purpose).
+- **Playback isn't always deterministic on some levels (likely randomness).** Eclypse challenge 4
+  (ID 104346126): 4 playbacks of the same macro; 2 had zero drift, 2 had dx=2.4 / dy=2.4 at tick 694
+  (about 1.4 s in). Physics correction snapped them back, so all 4 completed. The suspected cause
+  is GD's per-attempt random seed (random triggers); GDR2 stores a `seed` in its metadata for this
+  reason. Next steps: find where GD seeds its RNG on attempt start, save the seed with the recording,
+  and set it on playback. Then re-run with correction off.
+- **Local/editor levels all have level ID 0**, so they share one recording slot (an Aurorae 2
+  playback loaded a different level's recording). Fixed by named save files in M6. Until then,
+  match by level name too, or warn.

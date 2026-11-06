@@ -105,6 +105,7 @@ class $modify(DBBaseGameLayer, GJBaseGameLayer) {
 		db::MacroManager::get().dispatchDue(this, after, true);
 
 		auto pl = static_cast<PlayLayer*>(static_cast<GJBaseGameLayer*>(this));
+		db::MacroManager::get().onStepEnd(after, m_player1);
 		db::checkpoints::onStepEnd(pl);
 		db::cptest::onStepEnd(pl);
 

@@ -35,6 +35,7 @@ namespace db {
 		void onInput(uint32_t tick, bool down, int button, bool player2, PlayerObject* player);
 		void onLevelComplete(PlayLayer* pl, uint32_t tick);
 		void onQuit();
+		void onStepEnd(uint32_t tick, PlayerObject* player);              // end of every processCommands
 
 		// --- playback ---
 		// Should an input that did not come from the macro be dropped? (Player's own clicks.)
@@ -65,6 +66,16 @@ namespace db {
 		Macro m_macro;
 		bool m_held[2] = {false, false}; // jump held per key (P1, P2), used to drop duplicate inputs
 		uint32_t m_dropped = 0;          // duplicate inputs dropped this attempt (diagnostic)
+
+		// Practice respawn while a key is held: GD releases the player at respawn tick + 2 (its own
+		// release, always on the P1 key). The recording must release the held key(s) at that tick too.
+		struct RespawnRelease {
+			bool active = false;
+			uint32_t tick = 0;
+			PhysSnapshot fallbackPhys; // respawn state, used only if GD's release never arrives
+		} m_respawnRelease;
+		void emitRespawnRelease(PhysSnapshot const& phys, char const* how);
+		static PhysSnapshot snapshotOf(PlayerObject* player);
 
 		// last completed recording per level, so Playback works right after recording
 		std::map<int, Macro> m_completed;

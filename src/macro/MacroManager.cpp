@@ -121,13 +121,59 @@ namespace db {
 		}
 
 		// Practice respawn: drop everything recorded after the checkpoint.
-		// (Re-pressing a button held at the checkpoint, and exact state restore, are M4/M5.)
 		auto before = m_macro.inputs.size();
 		std::erase_if(m_macro.inputs, [tick](MacroInput const& in) { return in.frame > tick; });
 		m_macro.endFrame = 0;
 		recomputeHeld();
+		m_respawnRelease = {};
 		log::info("record: respawn at tick {} (practice={}), removed {} inputs, {} left",
 			tick, practice, before - m_macro.inputs.size(), m_macro.inputs.size());
+
+		// A key was held at the checkpoint. After a respawn GD always releases the player at tick + 2,
+		// so the recording has to release that key there as well (see emitRespawnRelease).
+		if (m_held[0] || m_held[1]) {
+			m_respawnRelease.active = true;
+			m_respawnRelease.tick = tick + 2;
+			m_respawnRelease.fallbackPhys = snapshotOf(pl ? pl->m_player1 : nullptr);
+			log::info("record: key held at the checkpoint (P1={} P2={}), release expected at tick {}",
+				m_held[0], m_held[1], m_respawnRelease.tick);
+		}
+	}
+
+	PhysSnapshot MacroManager::snapshotOf(PlayerObject* player) {
+		PhysSnapshot s;
+		if (!player) return s;
+		s.x = player->m_position.x;
+		s.y = player->m_position.y;
+		s.rotation = player->getRotation();
+		s.xVel = player->getCurrentXVelocity();
+		s.yVel = player->m_yVelocity;
+		return s;
+	}
+
+	void MacroManager::emitRespawnRelease(PhysSnapshot const& phys, char const* how) {
+		for (int k = 0; k < 2; ++k) {
+			if (!m_held[k]) continue;
+			MacroInput in;
+			in.frame = m_respawnRelease.tick;
+			in.button = 1;
+			in.down = false;
+			in.player2 = k == 1;
+			in.phys = phys;
+			m_macro.inputs.push_back(in);
+			m_held[k] = false;
+			log::info("record: added release for key {} at tick {} ({})", k == 1 ? "P2" : "P1", in.frame, how);
+		}
+		m_respawnRelease.active = false;
+	}
+
+	void MacroManager::onStepEnd(uint32_t tick, PlayerObject* player) {
+		if (!isRecording() || !m_respawnRelease.active) return;
+		if (tick < m_respawnRelease.tick) return;
+		// GD's own release didn't arrive. Use the respawn state: nothing moves between the respawn
+		// and the first step, so it's the state the release is applied to.
+		log::warn("record: GD's release after the respawn did not arrive by tick {}", tick);
+		emitRespawnRelease(m_respawnRelease.fallbackPhys, "fallback, respawn state");
 	}
 
 	void MacroManager::recomputeHeld() {
@@ -138,6 +184,12 @@ namespace db {
 	void MacroManager::onInput(uint32_t tick, bool down, int button, bool player2, PlayerObject* player) {
 		if (!isRecording()) return;
 		if (button != 1) return; // platformer left/right: out of scope for now
+
+		// First input at/after the post-respawn tick (normally GD's own release): end the held
+		// key(s) here, with the state this input is applied to.
+		if (m_respawnRelease.active && tick >= m_respawnRelease.tick) {
+			emitRespawnRelease(snapshotOf(player), down ? "before a press" : "GD's respawn release");
+		}
 
 		bool& held = m_held[player2 ? 1 : 0];
 		if (held == down) {
@@ -153,13 +205,7 @@ namespace db {
 		in.button = static_cast<uint8_t>(button);
 		in.down = down;
 		in.player2 = player2;
-		if (player) {
-			in.phys.x = player->m_position.x;
-			in.phys.y = player->m_position.y;
-			in.phys.rotation = player->getRotation();
-			in.phys.xVel = player->getCurrentXVelocity();
-			in.phys.yVel = player->m_yVelocity;
-		}
+		in.phys = snapshotOf(player);
 		m_macro.inputs.push_back(in);
 	}
 
