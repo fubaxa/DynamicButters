@@ -314,6 +314,22 @@ then late side, each until the first failure, the neighbouring input, or the ran
 `InputWindow` per input (GDR2 extension v4, matched by tick/key/press when read) and
 `<macro>.windows.txt` with every input's window and the 15 tightest clicks.
 
+**Scan speed-up attempt (reverted, pick up next session):** tried up to 16 physics steps per
+virtual frame (1 near a checkpoint), 50 ms per rendered frame, and hiding the level between draws.
+- Results changed: 6 of 24 ship challenge windows differed by one step from the 1-step-per-frame
+  scan (inputs 4, 7, 14, 15, 17, 22). So step grouping *does* matter at the edge of a window, even
+  though whole playbacks were identical in M8a. Multi-step frames are out unless that's explained.
+- It was barely faster anyway: 6,056 vs 5,286 ticks/s (25.9 ticks per virtual frame).
+- Untested on their own: hiding the level between draws and the larger per-frame budget (those don't
+  touch physics, so they can't change results).
+- **Bug (likely also in the committed scan):** when a trial reaches the end wall the scan swallows
+  `levelComplete` so the trial counts as a pass. After the scan finished, GD was left past the end
+  without having completed: the game was stuck (player kept running, user couldn't do anything).
+  Fix: after a scan, respawn at the start/checkpoint (or don't swallow on the final trial), and make
+  sure GD's end-of-level state is reset.
+- The ship challenge windows saved after that run (file + report) come from the 16-step version:
+  re-scan with the 1-step build to restore them.
+
 Agreed design: For each click of the macro, find its real window by
 simulation: fast-forward the macro (Seek), place one GD checkpoint shortly before the click (not
 inside a hold), then for each candidate frame respawn there and play the macro with only that click
