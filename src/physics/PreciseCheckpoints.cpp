@@ -75,10 +75,9 @@ namespace db::checkpoints {
 			log::info("checkpoint:   saved {}", f->p1.str());
 		}
 
-		if (settings::preciseCheckpoints()) {
-			f->p1.restore(pl->m_player1);
-			bool twoPlayer = pl->m_levelSettings && pl->m_levelSettings->m_twoPlayerMode;
-			if (twoPlayer) f->p2.restore(pl->m_player2);
-		}
+		// No restore: GD's own respawn state is the one the continuous run matches. Overwriting it
+		// with this end-of-step snapshot broke ship recordings (see PLAN.md, M6 testing): in a ship
+		// section GD's checkpoint was one step (1.95 units) ahead of the snapshot, and the run after
+		// the respawn only lined up with an unbroken run when GD's value was kept.
 	}
 }

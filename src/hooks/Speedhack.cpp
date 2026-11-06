@@ -25,7 +25,9 @@ namespace {
 
 class $modify(DBScheduler, CCScheduler) {
 	void update(float dt) {
-		float speed = static_cast<float>(Mod::get()->getSettingValue<double>("speedhack"));
+		auto mod = Mod::get();
+		float speed = mod->getSettingValue<bool>("speedhack-enabled")
+			? static_cast<float>(mod->getSettingValue<double>("speedhack")) : 1.f;
 		if (!(speed > 0.f) || !std::isfinite(speed)) speed = 1.f;
 		bool inLevel = PlayLayer::get() != nullptr;
 		float effective = inLevel ? speed : 1.f;

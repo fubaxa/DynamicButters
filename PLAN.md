@@ -19,6 +19,13 @@ Status after M0:
 - `mod.json`: `"geode": "6.0.0-alpha.1"`, `"gd": { "win": "2.2091" }`.
 - v6 API changes found so far: `geode::Popup` is no longer a template (`init(w, h)`). Expect more alpha
   changes, so the UI is written last.
+- **Keep the SDK on the installed loader's commit.** The installed Geode is a newer nightly build
+  that still calls itself 6.0.0-alpha.1 (log line "Loader commit: 7487940"), while the SDK checkout was
+  on the `v6.0.0-alpha.1` tag. Their `geode::Popup::init`/`setTitle` signatures differ, so the mod failed
+  to load with `ERROR_PROC_NOT_FOUND`. The SDK checkout is now at `74879409`. After updating Geode,
+  move the SDK to the commit in that log line. After adding new Geode API calls, check the mod DLL's
+  imports against the installed DLLs' exports (`dumpbin /imports` vs `dumpbin /exports`). The popups
+  use our own `FLAlertLayer` base, so they don't depend on `geode::Popup` at all.
 
 ---
 
@@ -140,6 +147,14 @@ Mode changes take effect on the next `resetLevel`; Stop takes effect immediately
 
 ## 5. Precise practice checkpoints (built into the mod)
 
+> **Update (M6 testing): the restore was removed; GD's own checkpoints are kept.** Checkpoints the
+> player places (key press, processed inside a step) got a snapshot one physics step behind GD's own
+> state (for example ship: dx=1.95, cube: dx=1.05). The run after the respawn only matches an unbroken
+> run with GD's state, so restoring the snapshot corrupted every practice recording after its first
+> respawn. The automatic test placed its checkpoints from outside a step, where both agree, so it
+> never showed this. The snapshot is still taken and the difference logged ("GD respawn vs saved"),
+> as a diagnostic. The original design below is kept for reference.
+
 The problem: vanilla checkpoints don't fully restore player state (position, velocity and rotation lose
 precision, and some flags aren't saved), so the run after loading a checkpoint is slightly different from
 the original run. That breaks practice-recorded macros, and later it would make Dynamic's frame windows
@@ -217,10 +232,11 @@ when triggers and objects are dense.
 | Key | Default | Notes |
 |---|---|---|
 | `safe-mode` | `true` | Turn off at your own risk |
-| `precise-checkpoints` | `true` | |
 | `checkpoint-test` | `false` | Debug, M4: automatic checkpoint precision test |
-| `speedhack` | `1.0` | 0.1–2.0, game + music speed while in a level. Any attempt not at 1.0 is safe-mode only (M7) |
-| `macro-mode` | `Off` | Off / Record / Playback. Temporary until the M6 popup; applies at the next attempt |
+| `speedhack-enabled` | `false` | Speedhack on/off. Also in the pause popup and on the hotkey |
+| `speedhack-key` | `Alt+S` | Keybind setting (Geode, gameplay category): toggles `speedhack-enabled` |
+| `speedhack` | `1.0` | 0.1–2.0, game + music speed while in a level. Slider in the pause popup. Any attempt not at 1.0 is safe-mode only (M7) |
+| `macro-mode` | `Off` | Off / Record / Playback. Set from the pause popup (M6); applies at the next attempt |
 | `physics-correction` | `true` | Apply "Phys" snapshots during playback |
 | `show-tick-counter` | `true` | Overlay (top-left). Added in M1 |
 | `log-inputs` | `true` | Debug, M1. Turn the default off before release |
@@ -237,11 +253,11 @@ when triggers and objects are dense.
 | M1 ✅ | Tick counter overlay + log every applied input | Tick = +2 per step; CBS confirmed as the only source of half-steps and forced off every frame |
 | M2 ✅ | Recording (normal mode) with Phys snapshots: `MacroManager` + `Macro`, temporary `macro-mode` setting (Off/Record), duplicate filter, practice cut-back, text dump on completion | Stereo Madness: 324 inputs, end tick 41138 (85.70 s at 480 ticks/s). Matches the log exactly apart from GD's own tick-2 release (dropped on purpose). No odd ticks, press/release always alternate |
 | M3 ✅ | Playback + physics correction. Verified: Stereo Madness replayed to 100% with correction off and on; 324/324 inputs, 0 late, max drift 0.000000 in x, y and y-velocity. Built: macro inputs applied right after `processQueuedButtons` when tick == frame (fallback after `processCommands`, counted as "late"); player's presses blocked; drift measured before every correction; plays the latest completed recording (memory, else newest dump file). Also added: pause-menu "DB" button that opens the settings, and the tick overlay freezes at level complete and shows REC/PLAY. The scheduler is still a cursor over the macro; the general InputScheduler for Dynamic comes in M9 | Easy level replays to 100% several times in a row, first with correction off (pure frame accuracy), then on |
-| M4 ✅ | Precise checkpoints. **Result: on Stereo Madness GD's own checkpoints are already exact**: 31/31 tests EXACT with precise checkpoints OFF, 33/33 with ON (respawn state and the next 120 steps identical). The +1.298 x offset seen in M1 came from the old log reading the state mid-step, not from GD. Precise checkpoints stay as a safety net for levels and gamemodes not tested yet. Known issue (debug only): the test keeps running after the level is complete. Built: `PlayerState` snapshot taken at the end of the step a checkpoint is created in (stored on `CheckpointObject` via `$modify` fields), compared against GD's respawn and restored when `precise-checkpoints` is on. Plus an automatic test (`checkpoint-test`): during practice-mode playback, every 2.5 s it places a checkpoint, records 0.5 s of the original run, respawns, and compares the replay tick by tick | Checkpoint test reports EXACT for every test with precise checkpoints on (and shows whether GD alone is exact with it off) |
+| M4 ✅ | Precise checkpoints. **Result: on Stereo Madness GD's own checkpoints are already exact**: 31/31 tests EXACT with precise checkpoints OFF, 33/33 with ON (respawn state and the next 120 steps identical). The +1.298 x offset seen in M1 came from the old log reading the state mid-step, not from GD. Precise checkpoints stay as a safety net for levels and gamemodes not tested yet. **M6 correction: the restore was wrong for player-placed checkpoints and was removed (see §5).** Known issue (debug only): the test keeps running after the level is complete. Built: `PlayerState` snapshot taken at the end of the step a checkpoint is created in (stored on `CheckpointObject` via `$modify` fields), compared against GD's respawn and restored when `precise-checkpoints` is on. Plus an automatic test (`checkpoint-test`): during practice-mode playback, every 2.5 s it places a checkpoint, records 0.5 s of the original run, respawns, and compares the replay tick by tick | Checkpoint test reports EXACT for every test with precise checkpoints on (and shows whether GD alone is exact with it off) |
 | ➕ Speedhack ✅ | `speedhack` setting (0.1–2.0): scales `CCScheduler::update`'s dt and the music pitch while a level is open | Verified: record and playback at different speeds both worked |
 | ➕ Pause fix ⏸ deferred | Pausing during a macro hold breaks the hold. See "Open issues" at the end | — |
 | M5 ✅ | Practice-mode recording. Verified: Eclypse challenge 4 recorded in practice mode, played back to 100% in normal mode (4 runs; see Open issues for the drift seen in 2 of them). Built: cut-back on respawn (inputs after the checkpoint tick removed). Found from the logs: after every practice respawn at tick T, GD sends its own release (P1 key) at T+2, so a re-press isn't needed; instead the recording must *end* a hold that was active at the checkpoint. For each held key a release is added at T+2, using the player state when GD's release arrives (fallback: respawn state). This fixes holds on the P2 key, whose release GD's P1-key release didn't cover | Practice-recorded macro (with deaths, including deaths mid-hold) replays to 100% in normal mode with physics correction off |
-| M6 | GDR2 save/load + pause-menu UI | Round-trip works; a `.gdr2` from another bot plays back |
+| M6 ✅ | GDR2 save/load + pause-menu UI. Built: own GDR2 reader/writer (`macro/Gdr2.cpp`, matches the reference library byte for byte: LEB128 varints, big-endian float/double, "Phys" input tag, P1 then P2 lists). File frame = tick / 2 (GDR2 counts 240/s steps); files with another framerate are scaled with a warning; platformer left/right inputs are dropped. Our replay extension: endTick + recordedAt. Files live in `<save dir>/macros/`, named after the level (`Name (2).gdr2` if taken), saved automatically on level complete. Playback picks: the file chosen in the popup, else this session's recording, else the newest file for the level (matched by ID, and by name for ID 0 levels, which fixes the local-level clash). The old text dumps are converted once at startup (`imported_<id>_<time>.gdr2`). The pause "DB" button opens the DynamicButter popup: mode (Off/Record/Playback, stored in the `macro-mode` setting), status, Load (file list, this level's macros first), Auto, Folder, Settings | Round-trip works; a `.gdr2` from another bot plays back |
 | M7 | Safe mode + settings | Playback completion doesn't save progress; setting turns it off |
 | M8 | Seek / macro start positions | Start from a snapshot, play the macro the rest of the way, beat the level |
 | M9 | Dynamic hook-in point | Scheduler takes "delay this user input to tick X" |
@@ -274,12 +290,13 @@ when triggers and objects are dense.
   - Recording is affected the same way: a pause mid-hold cuts the hold in-game but not in the recording.
   - `PlayerObject.cpp` keeps a debug log of the calls for when this is picked up.
 - **Checkpoint test keeps running after the level is complete** (debug tool only, not fixed on purpose).
-- **Playback isn't always deterministic on some levels (likely randomness).** Eclypse challenge 4
-  (ID 104346126): 4 playbacks of the same macro; 2 had zero drift, 2 had dx=2.4 / dy=2.4 at tick 694
-  (about 1.4 s in). Physics correction snapped them back, so all 4 completed. The suspected cause
-  is GD's per-attempt random seed (random triggers); GDR2 stores a `seed` in its metadata for this
-  reason. Next steps: find where GD seeds its RNG on attempt start, save the seed with the recording,
-  and set it on playback. Then re-run with correction off.
-- **Local/editor levels all have level ID 0**, so they share one recording slot (an Aurorae 2
-  playback loaded a different level's recording). Fixed by named save files in M6. Until then,
-  match by level name too, or warn.
+- **Practice recordings made before the M6 checkpoint fix are wrong after their first respawn.**
+  The precise-checkpoint restore put the player one physics step behind where GD respawns them
+  (ship level "ship": dx=1.95 from checkpoint tick 1664; playback with correction off drifted from
+  that point and died). Fixed by keeping GD's respawn state; those macros need to be re-recorded.
+  The Eclypse challenge 4 drift (dx/dy=2.4 at tick 694 in 2 of 4 playbacks), first blamed on the
+  random seed, is probably the same bug (that recording had a checkpoint at tick 204 with dx=1.61).
+  Re-record it and play with correction off to confirm; look at the seed only if it still drifts.
+- **Local/editor levels all have level ID 0**, so they shared one recording slot (an Aurorae 2
+  playback loaded a different level's recording). M6: macros are matched by ID and, for ID 0, by name.
+  Two local levels with the same name can still clash.

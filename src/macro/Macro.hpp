@@ -28,7 +28,16 @@ namespace db {
 		std::string levelName;
 		double framerate = 240.0;     // physics steps per second (GDR2 metadata)
 		uint32_t endFrame = 0;        // tick at level completion (0 = not completed)
+		int seed = 0;                 // GDR2 metadata; not captured yet (see PLAN.md open issues)
+		std::string author;
+		std::string botName = "DynamicButter"; // bot that recorded it (from the file when loaded)
+		int64_t recordedAt = 0;       // unix seconds; 0 = unknown (files from other bots)
 		std::vector<MacroInput> inputs; // sorted by frame, P1 and P2 keys interleaved
+
+		// Local/editor levels all have ID 0, so those are told apart by name.
+		bool isFor(int id, std::string const& name) const {
+			return levelID == id && (id != 0 || levelName == name);
+		}
 
 		void clear() {
 			inputs.clear();

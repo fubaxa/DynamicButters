@@ -1,13 +1,13 @@
 #include <Geode/Geode.hpp>
 #include <Geode/modify/PauseLayer.hpp>
-#include <Geode/ui/GeodeUI.hpp>
+
+#include "ui/MacroPopup.hpp"
 
 using namespace geode::prelude;
 
-// Pause-menu button that opens DynamicButter's settings (macro mode, CBS, overlay, debug logs).
+// Pause-menu button that opens the DynamicButter popup (macro mode, macro files, settings).
 // It lives in its own menu instead of one of GD's: the node-ids mod that names GD's pause menus
 // is disabled on 2.2091, and an own menu can't be broken by layout changes anyway.
-// In M6 this button opens the custom DynamicButter popup instead.
 
 class $modify(DBPauseLayer, PauseLayer) {
 	void customSetup() {
@@ -26,6 +26,6 @@ class $modify(DBPauseLayer, PauseLayer) {
 	}
 
 	void onDynamicButter(CCObject*) {
-		geode::openSettingsPopup(Mod::get());
+		db::ui::openMacroPopup();
 	}
 };

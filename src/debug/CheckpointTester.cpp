@@ -47,7 +47,7 @@ namespace db::cptest {
 			s.worstRespawn.maxWith(s.atRespawn);
 			s.worstWindow.maxWith(s.window);
 			log::info("cptest #{} at tick {} [{}]: respawn {} | next {} steps max {} | first divergence {}{}",
-				s.testNo, s.testTick, settings::preciseCheckpoints() ? "precise ON" : "precise OFF",
+				s.testNo, s.testTick, "GD restore",
 				s.atRespawn.str(), s.compared, s.window.str(),
 				s.firstDivergence ? fmt::format("+{} ticks", s.firstDivergence) : std::string("none"),
 				exact ? "  => EXACT" : "  => DIFFERS");
@@ -138,7 +138,7 @@ namespace db::cptest {
 	void logSummary(char const* reason) {
 		if (s.testNo == 0) return;
 		log::info("cptest summary ({}): {} tests, {} exact [{}]; worst at respawn {} | worst in window {}",
-			reason, s.testNo, s.exactTests, settings::preciseCheckpoints() ? "precise ON" : "precise OFF",
+			reason, s.testNo, s.exactTests, "GD restore",
 			s.worstRespawn.str(), s.worstWindow.str());
 	}
 }

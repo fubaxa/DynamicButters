@@ -6,9 +6,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <sstream>
 
 #include "debug/Settings.hpp"
+#include "macro/MacroStore.hpp"
 
 using namespace geode::prelude;
 
@@ -26,10 +26,6 @@ namespace db {
 			double d = std::fmod(std::abs(a - b), 360.0);
 			return std::min(d, 360.0 - d);
 		}
-
-		auto recordingsDir() {
-			return Mod::get()->getSaveDir() / "recordings";
-		}
 	}
 
 	MacroManager& MacroManager::get() {
@@ -41,28 +37,77 @@ namespace db {
 		return m_mode != MacroMode::Off || settings::forceDisableCbs();
 	}
 
-	void MacroManager::readModeSetting() {
-		auto value = Mod::get()->getSettingValue<std::string>("macro-mode");
-		auto mode = value == "Record" ? MacroMode::Record
-			: value == "Playback" ? MacroMode::Playback
-			: MacroMode::Off;
-		if (mode == m_mode) return;
+	namespace {
+		MacroMode modeFromString(std::string const& value) {
+			return value == "Record" ? MacroMode::Record
+				: value == "Playback" ? MacroMode::Playback
+				: MacroMode::Off;
+		}
+	}
 
-		log::info("macro: mode {} -> {}", modeName(m_mode), modeName(mode));
+	MacroMode MacroManager::pendingMode() const {
+		return modeFromString(Mod::get()->getSettingValue<std::string>("macro-mode"));
+	}
+
+	void MacroManager::setPendingMode(MacroMode mode) {
+		Mod::get()->setSettingValue<std::string>("macro-mode", modeName(mode));
+	}
+
+	void MacroManager::selectFile(std::string const& path) {
+		m_selectedPath = path;
+		m_reloadPending = true;
+		log::info("macro: selected {} for playback (applies at the next attempt)", store::fileNameOf(path));
+	}
+
+	void MacroManager::clearSelection() {
+		if (m_selectedPath.empty()) return;
+		m_selectedPath.clear();
+		m_reloadPending = true;
+	}
+
+	void MacroManager::applyPending() {
+		auto mode = pendingMode();
+		if (mode == m_mode && !m_reloadPending) return;
+		if (mode != m_mode) log::info("macro: mode {} -> {}", modeName(m_mode), modeName(mode));
+		m_reloadPending = false;
 		m_mode = mode;
 		m_play.reset();
-		if (m_mode == MacroMode::Playback) {
-			// Most recent completed recording of this level: from memory, else from disk.
-			auto it = m_completed.find(m_macro.levelID);
-			if (it != m_completed.end()) {
-				m_play = it->second;
-				log::info("playback: using the recording made this session ({} inputs)", m_play->inputs.size());
-			} else if (auto loaded = loadLatestDump(m_macro.levelID)) {
-				m_play = std::move(loaded);
-			} else {
-				log::warn("playback: no completed recording found for level {}, playback is inactive", m_macro.levelID);
+		m_playSource.clear();
+		if (m_mode == MacroMode::Playback) loadPlayback();
+	}
+
+	void MacroManager::loadPlayback() {
+		auto const& id = m_macro.levelID;
+		auto const& name = m_macro.levelName;
+		if (!m_selectedPath.empty()) {
+			auto res = store::load(m_selectedPath);
+			if (res) {
+				m_play = std::move(res).unwrap();
+				m_playSource = store::fileNameOf(m_selectedPath);
+				if (!m_play->isFor(id, name)) {
+					log::warn("playback: {} was recorded on level {} '{}', not this one ({} '{}')",
+						m_playSource, m_play->levelID, m_play->levelName, id, name);
+				}
+				log::info("playback: using selected file {} ({} inputs, bot {})",
+					m_playSource, m_play->inputs.size(), m_play->botName);
+				return;
 			}
+			log::error("playback: could not load {}: {}; using the newest recording instead",
+				m_selectedPath, res.unwrapErr());
 		}
+		if (m_lastRecording && m_lastRecording->isFor(id, name)) {
+			m_play = m_lastRecording;
+			m_playSource = m_lastSaved.empty() ? "this session's recording (not saved)" : m_lastSaved;
+			log::info("playback: using the recording made this session ({} inputs)", m_play->inputs.size());
+			return;
+		}
+		if (auto entry = store::latestFor(id, name)) {
+			m_play = std::move(entry->macro);
+			m_playSource = entry->fileName;
+			log::info("playback: loaded {} ({} inputs, bot {})", entry->fileName, m_play->inputs.size(), m_play->botName);
+			return;
+		}
+		log::warn("playback: no recording found for level {} '{}', playback is inactive", id, name);
 	}
 
 	void MacroManager::onLevelStart(GJGameLevel* level) {
@@ -74,16 +119,19 @@ namespace db {
 		// Force a fresh mode read (and playback load) for this level.
 		m_mode = MacroMode::Off;
 		m_play.reset();
+		m_playSource.clear();
+		m_selectedPath.clear();
+		m_reloadPending = true;
 		m_stats = {};
 		m_cursor = 0;
-		readModeSetting();
+		applyPending();
 	}
 
 	void MacroManager::onAttemptStart(PlayLayer* pl, uint32_t tick, bool practice) {
 		// Mode changes apply here, at the start of an attempt, so an attempt is never half recorded/played.
 		if (tick == 0) {
 			if (isPlaying() && m_stats.dispatched > 0) logPlaybackSummary("attempt ended");
-			readModeSetting();
+			applyPending();
 		}
 
 		if (isPlaying()) {
@@ -220,8 +268,7 @@ namespace db {
 		for (auto const& in : m_macro.inputs) presses += in.down;
 		log::info("record: level complete at tick {} ({:.2f} s): {} inputs ({} presses), {} duplicates dropped",
 			tick, tick / (2.0 * m_macro.framerate), m_macro.inputs.size(), presses, m_dropped);
-		m_completed[m_macro.levelID] = m_macro;
-		writeDump("complete");
+		saveRecording();
 	}
 
 	void MacroManager::onQuit() {
@@ -299,89 +346,23 @@ namespace db {
 			m_stats.maxDx, m_stats.maxAtTick, m_stats.maxDy, m_stats.maxDyVel, m_stats.maxDrot);
 	}
 
-	// ---------------------------------------------------------------- debug dump (until GDR2 in M6)
+	// ---------------------------------------------------------------- saving
 
-	// Temporary human-readable dump so recordings can be checked by eye and replayed after a restart.
-	// Replaced by real .gdr2 save/load in M6.
-	void MacroManager::writeDump(char const* reason) const {
-		auto dir = recordingsDir();
-		if (auto res = file::createDirectoryAll(dir); !res) {
-			log::error("record: could not create {}: {}", dir.string(), res.unwrapErr());
-			return;
-		}
-		auto stamp = std::chrono::duration_cast<std::chrono::seconds>(
+	void MacroManager::saveRecording() {
+		m_macro.recordedAt = std::chrono::duration_cast<std::chrono::seconds>(
 			std::chrono::system_clock::now().time_since_epoch()).count();
-		auto path = dir / fmt::format("{}_{}_{}.txt", m_macro.levelID, stamp, reason);
+		if (auto gm = GameManager::get()) m_macro.author = gm->m_playerName;
+		m_lastRecording = m_macro;
+		m_lastSaved.clear();
 
-		std::string out;
-		out += fmt::format("# DynamicButter recording (M2 debug dump)\n");
-		out += fmt::format("# level {} '{}', framerate {}, end tick {}, {} inputs\n",
-			m_macro.levelID, m_macro.levelName, m_macro.framerate, m_macro.endFrame, m_macro.inputs.size());
-		out += "# tick  action   key  x            y            rot        xVel        yVel\n";
-		for (auto const& in : m_macro.inputs) {
-			// 9 significant digits round-trip a float exactly; 17 do for a double.
-			out += fmt::format("{:>6}  {:<7}  {}   {:<14.9g} {:<14.9g} {:<12.9g} {:<20.17g} {:.17g}\n",
-				in.frame, in.down ? "PRESS" : "RELEASE", in.player2 ? "P2" : "P1",
-				in.phys.x, in.phys.y, in.phys.rotation, in.phys.xVel, in.phys.yVel);
-		}
-
-		if (auto res = file::writeString(path, out); !res) {
-			log::error("record: could not write {}: {}", path.string(), res.unwrapErr());
+		auto res = store::save(m_macro);
+		if (!res) {
+			log::error("record: saving failed: {}", res.unwrapErr());
+			Notification::create("DynamicButter: saving the macro failed (see log)", NotificationIcon::Error)->show();
 			return;
 		}
-		log::info("record: wrote {}", path.string());
-	}
-
-	std::optional<Macro> MacroManager::loadLatestDump(int levelID) const {
-		auto entries = file::readDirectory(recordingsDir());
-		if (!entries) return std::nullopt;
-
-		// Files are "<levelID>_<unix seconds>_complete.txt"; pick the newest for this level.
-		std::string prefix = fmt::format("{}_", levelID);
-		std::string bestPath;
-		long long bestStamp = -1;
-		for (auto const& entry : entries.unwrap()) {
-			auto full = entry.string();
-			auto slash = full.find_last_of("/\\");
-			auto name = slash == std::string::npos ? full : full.substr(slash + 1);
-			if (!name.starts_with(prefix) || !name.ends_with("_complete.txt")) continue;
-			auto stampStr = name.substr(prefix.size(), name.size() - prefix.size() - std::string("_complete.txt").size());
-			long long stamp = -1;
-			try { stamp = std::stoll(stampStr); } catch (...) { continue; }
-			if (stamp > bestStamp) { bestStamp = stamp; bestPath = full; }
-		}
-		if (bestPath.empty()) return std::nullopt;
-
-		auto text = file::readString(bestPath);
-		if (!text) {
-			log::error("playback: could not read {}: {}", bestPath, text.unwrapErr());
-			return std::nullopt;
-		}
-
-		Macro macro;
-		macro.levelID = levelID;
-		std::istringstream lines(text.unwrap());
-		std::string line;
-		while (std::getline(lines, line)) {
-			if (line.empty()) continue;
-			if (line[0] == '#') {
-				if (auto pos = line.find("end tick "); pos != std::string::npos) {
-					macro.endFrame = static_cast<uint32_t>(std::stoul(line.substr(pos + 9)));
-				}
-				continue;
-			}
-			std::istringstream row(line);
-			MacroInput in;
-			std::string action, key;
-			if (!(row >> in.frame >> action >> key >> in.phys.x >> in.phys.y >> in.phys.rotation >> in.phys.xVel >> in.phys.yVel)) {
-				log::warn("playback: skipping bad line in {}: {}", bestPath, line);
-				continue;
-			}
-			in.down = action == "PRESS";
-			in.player2 = key == "P2";
-			macro.inputs.push_back(in);
-		}
-		log::info("playback: loaded {} ({} inputs, end tick {})", bestPath, macro.inputs.size(), macro.endFrame);
-		return macro;
+		m_lastSaved = store::fileNameOf(res.unwrap());
+		log::info("record: saved {}", res.unwrap());
+		Notification::create(fmt::format("Macro saved: {}", m_lastSaved), NotificationIcon::Success)->show();
 	}
 }

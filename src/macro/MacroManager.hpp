@@ -2,8 +2,8 @@
 
 #include "macro/Macro.hpp"
 
-#include <map>
 #include <optional>
+#include <string>
 
 class PlayerObject;
 class PlayLayer;
@@ -24,6 +24,19 @@ namespace db {
 		bool isRecording() const { return m_mode == MacroMode::Record; }
 		bool isPlaying() const { return m_mode == MacroMode::Playback && m_play.has_value(); }
 		Macro const& macro() const { return m_macro; }
+
+		// --- pause-menu popup ---
+		// Mode from the setting; it becomes the active mode() at the start of the next attempt.
+		MacroMode pendingMode() const;
+		void setPendingMode(MacroMode mode);
+		// Play this file instead of the newest recording of the level (applies at the next attempt).
+		void selectFile(std::string const& path);
+		void clearSelection();
+		std::string const& selectedPath() const { return m_selectedPath; }
+		std::optional<Macro> const& playMacro() const { return m_play; }
+		std::string const& playSource() const { return m_playSource; }
+		std::string const& lastSaved() const { return m_lastSaved; }
+		bool hasPendingChange() const { return m_reloadPending || pendingMode() != m_mode; }
 
 		// True while the mod needs vanilla Click Between Steps off (recording, playback),
 		// or when the debug setting asks for it.
@@ -54,10 +67,10 @@ namespace db {
 
 	private:
 		MacroManager() = default;
-		void readModeSetting();
+		void applyPending();
+		void loadPlayback();
 		void recomputeHeld();
-		void writeDump(char const* reason) const;
-		std::optional<Macro> loadLatestDump(int levelID) const;
+		void saveRecording();
 		void logPlaybackSummary(char const* reason);
 
 		MacroMode m_mode = MacroMode::Off;
@@ -77,8 +90,13 @@ namespace db {
 		void emitRespawnRelease(PhysSnapshot const& phys, char const* how);
 		static PhysSnapshot snapshotOf(PlayerObject* player);
 
-		// last completed recording per level, so Playback works right after recording
-		std::map<int, Macro> m_completed;
+		// last completed recording this session, so Playback works right after recording even if saving failed
+		std::optional<Macro> m_lastRecording;
+		std::string m_lastSaved; // file name of the last saved recording
+
+		std::string m_selectedPath; // picked in the popup; empty = newest recording of the level
+		bool m_reloadPending = false;
+		std::string m_playSource;   // where m_play came from, for the popup
 
 		// playback
 		std::optional<Macro> m_play;

@@ -14,7 +14,20 @@
 			"default": "Off",
 			"one-of": ["Off", "Record", "Playback"],
 			"name": "Macro mode",
-			"description": "Record: records your inputs; a text file is written to the mod's save folder when you complete the level. Playback: replays the most recent completed recording of the level and ignores your own clicks. Takes effect at the start of the next attempt (restart after changing it)."
+			"description": "Also set from the DB button in the pause menu. Record: records your inputs and saves a .gdr2 file to the mod's macros folder when you complete the level. Playback: replays the macro picked in the DB popup, or the newest one recorded on this level, and ignores your own clicks. Takes effect at the start of the next attempt (restart after changing it)."
+		},
+		"speedhack-enabled": {
+			"type": "bool",
+			"default": false,
+			"name": "Speedhack enabled",
+			"description": "Turns the speedhack on or off. Also in the pause-menu DB popup, and on the speedhack hotkey."
+		},
+		"speedhack-key": {
+			"type": "keybind",
+			"default": "Alt+S",
+			"category": "gameplay",
+			"name": "Speedhack hotkey",
+			"description": "Turns the speedhack on or off while playing."
 		},
 		"speedhack": {
 			"type": "float",
@@ -26,13 +39,7 @@
 				"slider-step": 0.05
 			},
 			"name": "Speedhack",
-			"description": "Game speed while in a level (1.0 = normal), music included. Useful for recording hard levels slowly: macros are timed by tick, so they replay identically at 1.0. Attempts below or above 1.0 will be safe-mode only once safe mode exists (M7)."
-		},
-		"precise-checkpoints": {
-			"type": "bool",
-			"default": true,
-			"name": "Precise checkpoints",
-			"description": "Practice mode: each checkpoint also stores the exact player state and restores it on respawn. GD's own restore is compared against it in the log either way."
+			"description": "Game speed while in a level (1.0 = normal), music included, when the speedhack is enabled. Useful for recording hard levels slowly: macros are timed by tick, so they replay identically at 1.0. Attempts below or above 1.0 will be safe-mode only once safe mode exists (M7)."
 		},
 		"checkpoint-test": {
 			"type": "bool",
