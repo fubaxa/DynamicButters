@@ -87,6 +87,7 @@ namespace db {
 	// Shared per-frame runtime flags (set by the GJBaseGameLayer hooks).
 	namespace runtime {
 		inline bool inStep = false;        // inside GJBaseGameLayer::processCommands
+		inline unsigned stepInFrame = 0;   // 1-based index of the current step within its rendered frame
 		inline char const* pauseContext = nullptr; // "pause" / "resume" while those PlayLayer calls run
 	}
 }

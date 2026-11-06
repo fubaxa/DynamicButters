@@ -1,6 +1,8 @@
 #include <Geode/Geode.hpp>
 #include <Geode/modify/GJBaseGameLayer.hpp>
 
+#include <algorithm>
+
 #include "debug/Settings.hpp"
 #include "debug/RespawnProbe.hpp"
 #include "macro/MacroManager.hpp"
@@ -36,6 +38,12 @@ class $modify(DBBaseGameLayer, GJBaseGameLayer) {
 		unsigned windowInside = 0;
 		unsigned windowGaps = 0;
 		unsigned windowHalfTicks = 0;
+
+		// Frame grouping (M8a): how many steps each rendered frame ran, and how many steps GD
+		// flagged as the frame's last. Logged with the probe summary.
+		unsigned stepsThisFrame = 0;
+		unsigned frameHist[6] = {}; // 0, 1, 2, 3, 4, 5+ steps in a frame
+		unsigned windowLastTicks = 0;
 	};
 
 	bool isPlayLayer() {
@@ -50,7 +58,11 @@ class $modify(DBBaseGameLayer, GJBaseGameLayer) {
 			m_clickBetweenSteps = false;
 			log::info("force-cbs-off: CBS was on at tick {}, forced off", m_gameState.m_currentProgress);
 		}
+		auto f = m_fields.self();
+		f->stepsThisFrame = 0;
+		db::runtime::stepInFrame = 0;
 		GJBaseGameLayer::update(dt);
+		if (isPlayLayer()) f->frameHist[std::min(f->stepsThisFrame, 5u)]++;
 	}
 
 	void processQueuedButtons(float dt, bool clearInputQueue) {
@@ -93,6 +105,10 @@ class $modify(DBBaseGameLayer, GJBaseGameLayer) {
 			}
 		}
 
+		f->stepsThisFrame++;
+		db::runtime::stepInFrame = f->stepsThisFrame;
+		if (isLastTick) f->windowLastTicks++;
+
 		f->inProcessCommands = true;
 		db::runtime::inStep = true;
 		GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
@@ -132,6 +148,11 @@ class $modify(DBBaseGameLayer, GJBaseGameLayer) {
 				f->windowCalls, after - f->windowStartTick, f->windowInside,
 				f->windowGaps, f->windowHalfTicks, f->windowStartTick, after
 			);
+			auto& h = f->frameHist;
+			log::info("probe: frames by steps 0:{} 1:{} 2:{} 3:{} 4:{} 5+:{} | lastTick={} of {} steps",
+				h[0], h[1], h[2], h[3], h[4], h[5], f->windowLastTicks, f->windowCalls);
+			for (auto& n : h) n = 0;
+			f->windowLastTicks = 0;
 			f->windowCalls = 0;
 		}
 	}

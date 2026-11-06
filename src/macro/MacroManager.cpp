@@ -9,6 +9,7 @@
 
 #include "debug/Settings.hpp"
 #include "macro/MacroStore.hpp"
+#include "physics/PlayerState.hpp"
 
 using namespace geode::prelude;
 
@@ -305,21 +306,32 @@ namespace db {
 			}
 
 			PlayerObject* p = (!mi.player2 || !twoPlayer) ? gl->m_player1 : gl->m_player2;
+			// Recordings are made at 1 step per frame (240 FPS) where every input is on the first
+			// step of its frame. On a later step of a multi-step frame (speedhack > 1x, frame drops)
+			// the player's position at this point reads one step off even though the run is
+			// identical (M8a: the next input is back to 0 drift). So those inputs are neither measured
+			// nor corrected; correcting them would move a correctly placed player.
+			unsigned step = runtime::stepInFrame;
+			bool measurable = step <= 1;
+			if (!measurable) m_stats.unmeasured++;
 			if (p) {
 				double dx = std::abs(p->m_position.x - mi.phys.x);
 				double dy = std::abs(p->m_position.y - mi.phys.y);
 				double dyv = std::abs(p->m_yVelocity - mi.phys.yVel);
 				double drot = angleDiff(p->getRotation(), mi.phys.rotation);
-				if (dx > m_stats.maxDx) { m_stats.maxDx = dx; m_stats.maxAtTick = mi.frame; }
-				m_stats.maxDy = std::max(m_stats.maxDy, dy);
-				m_stats.maxDyVel = std::max(m_stats.maxDyVel, dyv);
-				m_stats.maxDrot = std::max(m_stats.maxDrot, drot);
-				if (logEach) {
-					log::info("play: {} key={} tick={} drift dx={:.6f} dy={:.6f} dyVel={:.6f} drot={:.4f}{}",
-						mi.down ? "PRESS  " : "RELEASE", mi.player2 ? "P2" : "P1", mi.frame,
-						dx, dy, dyv, drot, correct ? " (corrected)" : "");
+				if (measurable) {
+					if (dx > m_stats.maxDx) { m_stats.maxDx = dx; m_stats.maxAtTick = mi.frame; }
+					m_stats.maxDy = std::max(m_stats.maxDy, dy);
+					m_stats.maxDyVel = std::max(m_stats.maxDyVel, dyv);
+					m_stats.maxDrot = std::max(m_stats.maxDrot, drot);
 				}
-				if (correct) {
+				if (logEach) {
+					log::info("play: {} key={} tick={} step={} drift dx={:.6f} dy={:.6f} dyVel={:.6f} drot={:.4f}{}",
+						mi.down ? "PRESS  " : "RELEASE", mi.player2 ? "P2" : "P1", mi.frame, step,
+						dx, dy, dyv, drot,
+						!measurable ? " (not measured: later step of frame)" : correct ? " (corrected)" : "");
+				}
+				if (correct && measurable) {
 					cocos2d::CCPoint pos{mi.phys.x, mi.phys.y};
 					p->m_position = pos;
 					p->setPosition(pos);
@@ -340,9 +352,9 @@ namespace db {
 	void MacroManager::logPlaybackSummary(char const* reason) {
 		if (!m_play) return;
 		log::info(
-			"playback: {} - {} of {} inputs applied, {} late, {} corrected; max drift before correction "
+			"playback: {} - {} of {} inputs applied, {} late, {} corrected, {} not measured; max drift before correction "
 			"dx={:.6f} (at tick {}) dy={:.6f} dyVel={:.6f} drot={:.4f}",
-			reason, m_stats.dispatched, m_play->inputs.size(), m_stats.late, m_stats.corrected,
+			reason, m_stats.dispatched, m_play->inputs.size(), m_stats.late, m_stats.corrected, m_stats.unmeasured,
 			m_stats.maxDx, m_stats.maxAtTick, m_stats.maxDy, m_stats.maxDyVel, m_stats.maxDrot);
 	}
 

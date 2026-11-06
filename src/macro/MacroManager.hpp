@@ -107,6 +107,7 @@ namespace db {
 			uint32_t dispatched = 0;
 			uint32_t late = 0;
 			uint32_t corrected = 0;
+			uint32_t unmeasured = 0; // inputs on a later step of a multi-step frame (see dispatchDue)
 			double maxDx = 0, maxDy = 0, maxDyVel = 0, maxDrot = 0;
 			uint32_t maxAtTick = 0;
 		} m_stats;
