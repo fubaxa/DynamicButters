@@ -4,6 +4,9 @@
 #include "debug/Settings.hpp"
 #include "debug/RespawnProbe.hpp"
 #include "macro/MacroManager.hpp"
+#include "debug/CheckpointTester.hpp"
+#include "physics/PlayerState.hpp"
+#include "physics/PreciseCheckpoints.hpp"
 
 using namespace geode::prelude;
 
@@ -91,13 +94,19 @@ class $modify(DBBaseGameLayer, GJBaseGameLayer) {
 		}
 
 		f->inProcessCommands = true;
+		db::runtime::inStep = true;
 		GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
+		db::runtime::inStep = false;
 		f->inProcessCommands = false;
 
 		unsigned after = m_gameState.m_currentProgress;
 
 		// Fallback: anything still due here missed processQueuedButtons this step.
 		db::MacroManager::get().dispatchDue(this, after, true);
+
+		auto pl = static_cast<PlayLayer*>(static_cast<GJBaseGameLayer*>(this));
+		db::checkpoints::onStepEnd(pl);
+		db::cptest::onStepEnd(pl);
 
 		if (db::debug::probeAtTick != 0 && after >= db::debug::probeAtTick) {
 			db::debug::logPlayer(

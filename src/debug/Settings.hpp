@@ -12,6 +12,12 @@ namespace db::settings {
 	inline bool tickProbe() {
 		return geode::Mod::get()->getSettingValue<bool>("tick-probe");
 	}
+	inline bool preciseCheckpoints() {
+		return geode::Mod::get()->getSettingValue<bool>("precise-checkpoints");
+	}
+	inline bool checkpointTest() {
+		return geode::Mod::get()->getSettingValue<bool>("checkpoint-test");
+	}
 	inline bool physicsCorrection() {
 		return geode::Mod::get()->getSettingValue<bool>("physics-correction");
 	}

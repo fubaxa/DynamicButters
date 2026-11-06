@@ -16,6 +16,30 @@
 			"name": "Macro mode",
 			"description": "Record: records your inputs; a text file is written to the mod's save folder when you complete the level. Playback: replays the most recent completed recording of the level and ignores your own clicks. Takes effect at the start of the next attempt (restart after changing it)."
 		},
+		"speedhack": {
+			"type": "float",
+			"default": 1.0,
+			"min": 0.1,
+			"max": 2.0,
+			"control": {
+				"arrow-step": 0.05,
+				"slider-step": 0.05
+			},
+			"name": "Speedhack",
+			"description": "Game speed while in a level (1.0 = normal), music included. Useful for recording hard levels slowly: macros are timed by tick, so they replay identically at 1.0. Attempts below or above 1.0 will be safe-mode only once safe mode exists (M7)."
+		},
+		"precise-checkpoints": {
+			"type": "bool",
+			"default": true,
+			"name": "Precise checkpoints",
+			"description": "Practice mode: each checkpoint also stores the exact player state and restores it on respawn. GD's own restore is compared against it in the log either way."
+		},
+		"checkpoint-test": {
+			"type": "bool",
+			"default": false,
+			"name": "Checkpoint test (debug)",
+			"description": "During Playback in practice mode: every 2.5 s, places a checkpoint, respawns at it after 0.5 s, and logs whether the replay matches the original run exactly."
+		},
 		"physics-correction": {
 			"type": "bool",
 			"default": true,

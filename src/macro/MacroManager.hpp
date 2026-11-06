@@ -43,6 +43,13 @@ namespace db {
 		// (fallback when processQueuedButtons did not run this step).
 		void dispatchDue(GJBaseGameLayer* gl, uint32_t tick, bool late);
 		bool isDispatching() const { return m_dispatching; }
+		bool isMacroHolding() const { return isPlaying() && (m_playHeld[0] || m_playHeld[1]); }
+		// A button is held according to the macro (playback) or the recording (record mode).
+		bool isHoldingAny() const {
+			if (isPlaying()) return m_playHeld[0] || m_playHeld[1];
+			if (isRecording()) return m_held[0] || m_held[1];
+			return false;
+		}
 
 	private:
 		MacroManager() = default;

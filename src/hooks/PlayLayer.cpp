@@ -6,6 +6,9 @@
 #include "debug/Settings.hpp"
 #include "debug/RespawnProbe.hpp"
 #include "macro/MacroManager.hpp"
+#include "debug/CheckpointTester.hpp"
+#include "physics/PreciseCheckpoints.hpp"
+#include "physics/PlayerState.hpp"
 
 using namespace geode::prelude;
 
@@ -20,6 +23,7 @@ class $modify(DBPlayLayer, PlayLayer) {
 	bool init(GJGameLevel* level, bool dontCreateObjects) {
 		// Set up the macro before the original init: init calls resetLevel, which starts attempt 1.
 		db::MacroManager::get().onLevelStart(level);
+		db::cptest::onLevelStart();
 		if (!PlayLayer::init(level, dontCreateObjects)) return false;
 		log::info("PlayLayer::init level {} '{}' twoPlayer={} cbsOverride={} clickBetweenSteps={} clickOnSteps={}",
 			level->m_levelID.value(), level->m_levelName,
@@ -47,6 +51,7 @@ class $modify(DBPlayLayer, PlayLayer) {
 
 	void postUpdate(float dt) {
 		PlayLayer::postUpdate(dt);
+		db::cptest::onFrameEnd(this);
 		auto label = m_fields->tickLabel;
 		if (!label) return;
 		bool show = db::settings::showTickCounter();
@@ -67,6 +72,8 @@ class $modify(DBPlayLayer, PlayLayer) {
 		PlayLayer::resetLevel();
 		m_fields->endTick.reset();
 		unsigned now = m_gameState.m_currentProgress;
+		// GD has finished restoring the player here; compare with / apply the precise state first.
+		db::checkpoints::afterReset(this, now);
 		log::info("resetLevel: tick {} -> {} (practice={}, checkpoints={})",
 			before, now, m_isPracticeMode,
 			m_checkpointArray ? m_checkpointArray->count() : 0);
@@ -76,29 +83,45 @@ class $modify(DBPlayLayer, PlayLayer) {
 		db::debug::respawnTick = now;
 		db::debug::probeAtTick = now + db::debug::PROBE_DELAY;
 		db::MacroManager::get().onAttemptStart(this, now, m_isPracticeMode);
+		db::cptest::onAttemptStart(this, now);
 	}
 
 	void levelComplete() {
 		unsigned tick = m_gameState.m_currentProgress;
 		m_fields->endTick = tick;
 		db::MacroManager::get().onLevelComplete(this, tick);
+		db::cptest::logSummary("level complete");
 		PlayLayer::levelComplete();
 	}
 
 	void onQuit() {
 		db::MacroManager::get().onQuit();
+		db::cptest::logSummary("left the level");
 		PlayLayer::onQuit();
+	}
+
+	void pauseGame(bool unfocused) {
+		db::runtime::pauseContext = "pause";
+		PlayLayer::pauseGame(unfocused);
+		db::runtime::pauseContext = nullptr;
+	}
+
+	void resume() {
+		db::runtime::pauseContext = "resume";
+		PlayLayer::resume();
+		db::runtime::pauseContext = nullptr;
 	}
 
 	void loadFromCheckpoint(CheckpointObject* object) {
 		unsigned before = m_gameState.m_currentProgress;
 		PlayLayer::loadFromCheckpoint(object);
+		db::checkpoints::onLoad(object);
 		log::info("loadFromCheckpoint: tick {} -> {}", before, m_gameState.m_currentProgress);
 	}
 
 	CheckpointObject* createCheckpoint() {
 		auto cp = PlayLayer::createCheckpoint();
-		db::debug::logPlayer("createCheckpoint: state", m_gameState.m_currentProgress, m_player1);
+		db::checkpoints::onCreated(this, cp);
 		return cp;
 	}
 };

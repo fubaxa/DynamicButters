@@ -206,7 +206,7 @@ when triggers and objects are dense.
    default). In 1-player levels both keys control player 1. Macros store the flag exactly as GD gives
    it, which maps directly onto GDR2's separate P1 and P2 input lists, and playback passes it back
    unchanged. That gives 2-player support almost for free later.
-5. **Safe mode** (mod setting, **on by default**, can be turned off): any attempt that used playback,
+5. **Safe mode** (mod setting, **on by default**, can be turned off): any attempt that used a speedhack other than 1.0, playback,
    Dynamic or a seek snapshot can't save progress or completion or submit to leaderboards. Show a small
    "Safe mode" label in-game while it's active.
 
@@ -218,6 +218,8 @@ when triggers and objects are dense.
 |---|---|---|
 | `safe-mode` | `true` | Turn off at your own risk |
 | `precise-checkpoints` | `true` | |
+| `checkpoint-test` | `false` | Debug, M4: automatic checkpoint precision test |
+| `speedhack` | `1.0` | 0.1–2.0, game + music speed while in a level. Any attempt not at 1.0 is safe-mode only (M7) |
 | `macro-mode` | `Off` | Off / Record / Playback. Temporary until the M6 popup; applies at the next attempt |
 | `physics-correction` | `true` | Apply "Phys" snapshots during playback |
 | `show-tick-counter` | `true` | Overlay (top-left). Added in M1 |
@@ -235,7 +237,9 @@ when triggers and objects are dense.
 | M1 ✅ | Tick counter overlay + log every applied input | Tick = +2 per step; CBS confirmed as the only source of half-steps and forced off every frame |
 | M2 ✅ | Recording (normal mode) with Phys snapshots: `MacroManager` + `Macro`, temporary `macro-mode` setting (Off/Record), duplicate filter, practice cut-back, text dump on completion | Stereo Madness: 324 inputs, end tick 41138 (85.70 s at 480 ticks/s). Matches the log exactly apart from GD's own tick-2 release (dropped on purpose). No odd ticks, press/release always alternate |
 | M3 ✅ | Playback + physics correction. Verified: Stereo Madness replayed to 100% with correction off and on; 324/324 inputs, 0 late, max drift 0.000000 in x, y and y-velocity. Built: macro inputs applied right after `processQueuedButtons` when tick == frame (fallback after `processCommands`, counted as "late"); player's presses blocked; drift measured before every correction; plays the latest completed recording (memory, else newest dump file). Also added: pause-menu "DB" button that opens the settings, and the tick overlay freezes at level complete and shows REC/PLAY. The scheduler is still a cursor over the macro; the general InputScheduler for Dynamic comes in M9 | Easy level replays to 100% several times in a row, first with correction off (pure frame accuracy), then on |
-| M4 | Precise checkpoints | Load test from §5 passes |
+| M4 ✅ | Precise checkpoints. **Result: on Stereo Madness GD's own checkpoints are already exact**: 31/31 tests EXACT with precise checkpoints OFF, 33/33 with ON (respawn state and the next 120 steps identical). The +1.298 x offset seen in M1 came from the old log reading the state mid-step, not from GD. Precise checkpoints stay as a safety net for levels and gamemodes not tested yet. Known issue (debug only): the test keeps running after the level is complete. Built: `PlayerState` snapshot taken at the end of the step a checkpoint is created in (stored on `CheckpointObject` via `$modify` fields), compared against GD's respawn and restored when `precise-checkpoints` is on. Plus an automatic test (`checkpoint-test`): during practice-mode playback, every 2.5 s it places a checkpoint, records 0.5 s of the original run, respawns, and compares the replay tick by tick | Checkpoint test reports EXACT for every test with precise checkpoints on (and shows whether GD alone is exact with it off) |
+| ➕ Speedhack ✅ | `speedhack` setting (0.1–2.0): scales `CCScheduler::update`'s dt and the music pitch while a level is open | Verified: record and playback at different speeds both worked |
+| ➕ Pause fix ⏸ deferred | Pausing during a macro hold breaks the hold. See "Open issues" at the end | — |
 | M5 | Practice-mode recording (cut-back + re-press) | Practice-recorded macro replays in normal mode |
 | M6 | GDR2 save/load + pause-menu UI | Round-trip works; a `.gdr2` from another bot plays back |
 | M7 | Safe mode + settings | Playback completion doesn't save progress; setting turns it off |
@@ -251,3 +255,22 @@ when triggers and objects are dense.
 - Releases get the same treatment (or their own leniency setting).
 - Real windows (e.g. 5136–5138) can later be saved per input in the replay extension.
 - The cursor of used inputs resets on reset and moves back when a checkpoint or seek snapshot is loaded.
+
+---
+
+## 11. Open issues
+
+- **Pausing during a macro hold breaks the hold (deferred, low priority).** Found in M4 testing.
+  Pausing (for example to change a setting) during a long hold in playback cuts the hold, and the
+  player dies or drifts.
+  - What we know: pausing and resuming call `PlayerObject::releaseAllButtons()` directly (4× on
+    pause, 2× on resume), not through `handleButton`, so the macro never sees the release.
+  - Tried: skipping `releaseAllButtons()` during `PlayLayer::pauseGame`/`resume` while a button is
+    held. The calls were blocked, but the hold still broke (the next macro input after resuming had
+    dy=62, dyVel=3.8 of drift). So GD also clears the hold somewhere else, possibly
+    `GJBaseGameLayer::removeReleasedButtons`, the input queue, or `PlayerObject::m_holdingButtons`.
+  - Ideas for later: find the other place GD clears the hold, or re-press the held key on resume
+    (that adds an extra press edge, which could trigger an orb/jump buffer, so it needs care).
+  - Recording is affected the same way: a pause mid-hold cuts the hold in-game but not in the recording.
+  - `PlayerObject.cpp` keeps a debug log of the calls for when this is picked up.
+- **Checkpoint test keeps running after the level is complete** (debug tool only, not fixed on purpose).
