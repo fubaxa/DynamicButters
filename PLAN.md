@@ -425,6 +425,50 @@ own windows. Results go in the replay extension as per-input (earliest, latest).
 
 ---
 
+## 10b. Known issues going into Dynamic (M9)
+
+**Will affect how Dynamic behaves**
+1. **Windows are only valid at 240 FPS, 1x speed.** The scan runs one physics step per frame; grouping
+   steps differently changed 6 of 24 windows by a step (scan speed-up attempt). Players at other FPS,
+   or with the speedhack above 1x (2-step frames), get different edges. Dynamic should either require
+   240 FPS / 1x or mark itself approximate.
+2. **CBS / CBF must stay off.** Windows are in whole steps; Click Between Steps would put clicks inside a
+   step. Recording/playback already force CBS off; Dynamic needs the same.
+3. **Chained windows assume the later clicks happen at their recorded ticks.** After Dynamic fires a
+   click at the edge of a chained window, the player's path until the next resting point differs a
+   little, so the next clicks' windows in that section are approximate until the next resting point.
+   Exact windows don't have this problem.
+4. **Gaps (106 in Stereo Madness):** only the connected window around the recorded frame is used;
+   frames past the first failure are ignored even if they'd pass.
+5. **Matching the player's clicks to macro clicks.** Dynamic has to decide which macro click a user
+   press belongs to, and notice when the player is off the macro's route (missed click, extra click,
+   different route). Planned: compare the live state with the survey reference and only assist while
+   the player is on it; resync at the next resting point.
+6. **Both jump keys count as the same click** in 1-player levels (macro clicks record the key used).
+7. **Releases:** windows exist for releases too (ship holds). Delaying an early release until the window
+   opens is the mirror of the press case; needs deciding whether Dynamic does it.
+8. **Only early clicks can be helped.** A late click can't be moved back in time; late windows are
+   information only.
+
+**Open bugs / limits that touch Dynamic**
+9. **Practice checkpoints round y / y-velocity** (ship sections). After a practice respawn the state
+   differs slightly from the macro's run, so windows after a respawn may not hold. The scan restores
+   the exact state for its own (frame-end) checkpoints; player-placed checkpoints are captured
+   mid-step (M6 finding), so the same fix needs care there.
+10. **Pausing during a hold breaks the hold** (deferred since M4). Dynamic delays presses, so a pause
+    between the user's click and the delayed press, or during a hold, needs handling.
+11. **GD's own release 2 ticks after every respawn** (P1 key). A delayed press scheduled around a
+    respawn must come after it (it does for playback; same rule for Dynamic).
+12. **Start positions:** playback from level start positions still drifts in y (spawn state isn't the
+    real run's). Dynamic from a start position would use wrong windows; Seek (exact checkpoints) is
+    the alternative but hasn't been tested in-game.
+13. **Scan cost:** about 4x the level length (Stereo Madness 85 s -> 354 s); long ship/wave stretches
+    with few resting points are slower. A level must be scanned before Dynamic can use it; windows are
+    tied to the macro and are lost on re-recording.
+14. **One unexplained Verify failure** ("ship", checkpoint at tick 8020: an orb/pad/trigger interaction
+    differs right after the respawn). Its click is unmeasured.
+15. **Safe mode:** Dynamic attempts must be marked unsafe (`safe::markUnsafe`).
+
 ## 11. Open issues
 
 - **Pausing during a macro hold breaks the hold (deferred, low priority).** Found in M4 testing.
