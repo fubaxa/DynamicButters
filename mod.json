@@ -12,9 +12,15 @@
 		"macro-mode": {
 			"type": "string",
 			"default": "Off",
-			"one-of": ["Off", "Record"],
+			"one-of": ["Off", "Record", "Playback"],
 			"name": "Macro mode",
-			"description": "Temporary control until the pause-menu UI exists. Record: records your inputs, and a text dump is written to the mod's save folder when you complete the level. Takes effect at the start of the next attempt."
+			"description": "Record: records your inputs; a text file is written to the mod's save folder when you complete the level. Playback: replays the most recent completed recording of the level and ignores your own clicks. Takes effect at the start of the next attempt (restart after changing it)."
+		},
+		"physics-correction": {
+			"type": "bool",
+			"default": true,
+			"name": "Physics correction",
+			"description": "During playback, snaps the player to the recorded position, rotation and y-velocity at every input. Turn off to test pure frame-accuracy. Drift is logged either way."
 		},
 		"show-tick-counter": {
 			"type": "bool",

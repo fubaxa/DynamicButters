@@ -1,18 +1,20 @@
 #include <Geode/Geode.hpp>
 #include <Geode/modify/PlayLayer.hpp>
 
+#include <optional>
+
 #include "debug/Settings.hpp"
 #include "debug/RespawnProbe.hpp"
 #include "macro/MacroManager.hpp"
 
 using namespace geode::prelude;
 
-// M1: tick counter overlay + logging of the tick around resets and checkpoint loads.
-// The checkpoint log answers whether GD restores m_currentProgress on its own (PLAN.md §5).
+// Tick overlay, attempt/checkpoint bookkeeping, and the MacroManager lifecycle calls.
 
 class $modify(DBPlayLayer, PlayLayer) {
 	struct Fields {
 		CCLabelBMFont* tickLabel = nullptr;
+		std::optional<unsigned> endTick; // set on level complete: the overlay freezes here
 	};
 
 	bool init(GJGameLevel* level, bool dontCreateObjects) {
@@ -27,7 +29,7 @@ class $modify(DBPlayLayer, PlayLayer) {
 		if (db::MacroManager::get().shouldForceCbsOff()) {
 			// Only affects this PlayLayer instance; the saved GD option is untouched.
 			m_clickBetweenSteps = false;
-			log::info("force-disable-cbs: clickBetweenSteps set to false for this level");
+			log::info("force-cbs-off: clickBetweenSteps set to false for this level");
 		}
 
 		auto label = CCLabelBMFont::create("tick 0", "bigFont.fnt");
@@ -49,14 +51,21 @@ class $modify(DBPlayLayer, PlayLayer) {
 		if (!label) return;
 		bool show = db::settings::showTickCounter();
 		label->setVisible(show);
-		if (show) {
-			label->setString(fmt::format("tick {}", m_gameState.m_currentProgress).c_str());
+		if (!show) return;
+
+		auto& mgr = db::MacroManager::get();
+		char const* mode = mgr.isRecording() ? "  REC" : mgr.isPlaying() ? "  PLAY" : "";
+		if (auto end = m_fields->endTick) {
+			label->setString(fmt::format("tick {} (end){}", *end, mode).c_str());
+		} else {
+			label->setString(fmt::format("tick {}{}", m_gameState.m_currentProgress, mode).c_str());
 		}
 	}
 
 	void resetLevel() {
 		unsigned before = m_gameState.m_currentProgress;
 		PlayLayer::resetLevel();
+		m_fields->endTick.reset();
 		unsigned now = m_gameState.m_currentProgress;
 		log::info("resetLevel: tick {} -> {} (practice={}, checkpoints={})",
 			before, now, m_isPracticeMode,
@@ -70,7 +79,9 @@ class $modify(DBPlayLayer, PlayLayer) {
 	}
 
 	void levelComplete() {
-		db::MacroManager::get().onLevelComplete(this, m_gameState.m_currentProgress);
+		unsigned tick = m_gameState.m_currentProgress;
+		m_fields->endTick = tick;
+		db::MacroManager::get().onLevelComplete(this, tick);
 		PlayLayer::levelComplete();
 	}
 

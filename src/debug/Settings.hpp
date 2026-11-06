@@ -12,6 +12,9 @@ namespace db::settings {
 	inline bool tickProbe() {
 		return geode::Mod::get()->getSettingValue<bool>("tick-probe");
 	}
+	inline bool physicsCorrection() {
+		return geode::Mod::get()->getSettingValue<bool>("physics-correction");
+	}
 	inline bool forceDisableCbs() {
 		return geode::Mod::get()->getSettingValue<bool>("force-disable-cbs");
 	}

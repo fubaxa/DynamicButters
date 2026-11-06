@@ -7,16 +7,20 @@
 
 using namespace geode::prelude;
 
-// M1: answers "is m_currentProgress exactly one physics tick per processCommands call?"
-// and logs every input GD actually applies, with the tick and player state.
+// Per-step hooks: CBS enforcement, tick probe, input recording and macro playback.
 //
-// The probe prints a summary once per 240 processCommands calls (about 1 s of gameplay):
-//   calls        processCommands calls in the window
-//   advanced     how far m_currentProgress moved over the window
-//   inside       how often the tick changed *during* the original call (vs between calls)
-//   gaps         calls where the tick moved by something other than 0 or 1 since the last call
-//   halfTicks    calls with isHalfTick = true
-// If advanced == calls and gaps == 0, the tick counter is safe to use as the macro frame.
+// Tick probe summary (once per 240 processCommands calls, about 1 s of gameplay):
+//   calls      processCommands calls in the window
+//   advanced   how far m_currentProgress moved (expect 2 x calls: +2 per step)
+//   inside     how often the tick changed *during* the original call
+//   gaps       calls where the tick jumped by more than one step since the last call
+//   halfTicks  calls with isHalfTick = true (only happens with Click Between Steps on)
+//
+// Playback timing: while recording, the player's input reached handleButton from inside the
+// step, at a moment when m_currentProgress already held that step's tick. Macro inputs are
+// applied at the same point: right after GD's processQueuedButtons, when tick == input frame.
+// If processQueuedButtons doesn't run in a step, the fallback after processCommands applies them
+// and counts them as "late" (shows up in the playback summary).
 
 class $modify(DBBaseGameLayer, GJBaseGameLayer) {
 	struct Fields {
@@ -36,9 +40,8 @@ class $modify(DBBaseGameLayer, GJBaseGameLayer) {
 	}
 
 	// GD can turn m_clickBetweenSteps back on mid-level (e.g. toggling the option from the
-	// pause menu), so forcing it once at init is not enough. update() decides whether a step
-	// gets split (it passes isHalfTick to processCommands), so the flag is enforced here,
-	// before every frame's physics.
+	// pause menu), so it's enforced before every frame's physics. update() decides whether a
+	// step gets split (it passes isHalfTick to processCommands).
 	void update(float dt) {
 		if (isPlayLayer() && db::MacroManager::get().shouldForceCbsOff() && m_clickBetweenSteps) {
 			m_clickBetweenSteps = false;
@@ -47,37 +50,44 @@ class $modify(DBBaseGameLayer, GJBaseGameLayer) {
 		GJBaseGameLayer::update(dt);
 	}
 
+	void processQueuedButtons(float dt, bool clearInputQueue) {
+		GJBaseGameLayer::processQueuedButtons(dt, clearInputQueue);
+		if (isPlayLayer()) {
+			db::MacroManager::get().dispatchDue(this, m_gameState.m_currentProgress, false);
+		}
+	}
+
 	void processCommands(float dt, bool isHalfTick, bool isLastTick) {
-		if (isHalfTick && isPlayLayer() && db::MacroManager::get().shouldForceCbsOff()) {
-			// Should never happen once update() enforces the flag; logged so the test shows it.
+		if (!isPlayLayer()) {
+			GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
+			return;
+		}
+		if (isHalfTick && db::MacroManager::get().shouldForceCbsOff()) {
+			// Should never happen once update() enforces the flag.
 			log::warn("force-cbs-off: half-step at tick {} despite CBS being forced off",
 				m_gameState.m_currentProgress);
 		}
-		if (!isPlayLayer() || !db::settings::tickProbe()) {
-			auto f = m_fields.self();
-			f->inProcessCommands = true;
-			GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
-			f->inProcessCommands = false;
-			return;
-		}
 
 		auto f = m_fields.self();
+		bool probe = db::settings::tickProbe();
 		unsigned before = m_gameState.m_currentProgress;
 
-		// Tick movement since the previous call (detects resets, checkpoint loads, skips).
-		if (f->hasLast) {
-			unsigned sinceLast = before - f->lastTickAtCall;
-			if (before < f->lastTickAtCall) {
-				log::debug("probe: tick went back {} -> {} (reset/checkpoint)", f->lastTickAtCall, before);
-				f->windowCalls = 0;
-			} else if (sinceLast > 1) {
-				f->windowGaps++;
-				log::warn("probe: tick jumped by {} between calls ({} -> {})", sinceLast, f->lastTickAtCall, before);
+		if (probe) {
+			// Tick movement since the previous call (detects resets, checkpoint loads, skips).
+			if (f->hasLast) {
+				unsigned sinceLast = before - f->lastTickAtCall;
+				if (before < f->lastTickAtCall) {
+					log::debug("probe: tick went back {} -> {} (reset/checkpoint)", f->lastTickAtCall, before);
+					f->windowCalls = 0;
+				} else if (sinceLast > 2) {
+					f->windowGaps++;
+					log::warn("probe: tick jumped by {} between calls ({} -> {})", sinceLast, f->lastTickAtCall, before);
+				}
 			}
-		}
-		if (f->windowCalls == 0) {
-			f->windowStartTick = before;
-			f->windowInside = f->windowGaps = f->windowHalfTicks = 0;
+			if (f->windowCalls == 0) {
+				f->windowStartTick = before;
+				f->windowInside = f->windowGaps = f->windowHalfTicks = 0;
+			}
 		}
 
 		f->inProcessCommands = true;
@@ -85,7 +95,9 @@ class $modify(DBBaseGameLayer, GJBaseGameLayer) {
 		f->inProcessCommands = false;
 
 		unsigned after = m_gameState.m_currentProgress;
-		if (after != before) f->windowInside++;
+
+		// Fallback: anything still due here missed processQueuedButtons this step.
+		db::MacroManager::get().dispatchDue(this, after, true);
 
 		if (db::debug::probeAtTick != 0 && after >= db::debug::probeAtTick) {
 			db::debug::logPlayer(
@@ -93,17 +105,17 @@ class $modify(DBBaseGameLayer, GJBaseGameLayer) {
 				after, m_player1);
 			db::debug::probeAtTick = 0;
 		}
+
+		if (!probe) return;
+		if (after != before) f->windowInside++;
 		if (isHalfTick) {
 			f->windowHalfTicks++;
-			// Logged individually so half-steps can be lined up with the input lines.
 			log::info("probe: HALF step tick {} -> {} (cbs={} betweenSteps={} lastTick={})",
 				before, after, m_clickBetweenSteps, m_isBetweenSteps, isLastTick);
 		}
-
 		f->hasLast = true;
 		f->lastTickAtCall = after;
 		f->windowCalls++;
-
 		if (f->windowCalls >= 240) {
 			log::info(
 				"probe: calls={} advanced={} inside={} gaps={} halfTicks={} (tick {}..{})",
@@ -120,15 +132,27 @@ class $modify(DBBaseGameLayer, GJBaseGameLayer) {
 			return;
 		}
 
+		auto& mgr = db::MacroManager::get();
+		bool fromMacro = mgr.isDispatching();
+
+		// During playback only the macro plays: drop the player's own inputs.
+		if (!fromMacro && mgr.shouldBlockExternalInput(down, !isPlayer1)) {
+			if (db::settings::logInputs()) {
+				log::info("input: blocked {} key={} tick={} (playback)",
+					down ? "press" : "release", isPlayer1 ? "P1" : "P2", m_gameState.m_currentProgress);
+			}
+			return;
+		}
+
 		// P1/P2 is the *key* that was pressed (e.g. up arrow = P2 key). In a 1-player
 		// level both keys control player 1, so snapshot/log the player that actually moves.
 		bool twoPlayer = m_levelSettings && m_levelSettings->m_twoPlayerMode;
 		auto p = (isPlayer1 || !twoPlayer) ? m_player1 : m_player2;
 
 		// Record before calling the original, so the snapshot is the state the input was applied to.
-		db::MacroManager::get().onInput(m_gameState.m_currentProgress, down, button, !isPlayer1, p);
+		mgr.onInput(m_gameState.m_currentProgress, down, button, !isPlayer1, p);
 
-		if (db::settings::logInputs()) {
+		if (db::settings::logInputs() && !fromMacro) {
 			log::info(
 				"input: {} btn={} key={} tick={} inStep={} betweenSteps={} x={:.4f} y={:.4f} yVel={:.6f}",
 				down ? "PRESS  " : "RELEASE", button, isPlayer1 ? "P1" : "P2",

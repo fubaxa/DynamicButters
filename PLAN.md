@@ -218,6 +218,7 @@ when triggers and objects are dense.
 |---|---|---|
 | `safe-mode` | `true` | Turn off at your own risk |
 | `precise-checkpoints` | `true` | |
+| `macro-mode` | `Off` | Off / Record / Playback. Temporary until the M6 popup; applies at the next attempt |
 | `physics-correction` | `true` | Apply "Phys" snapshots during playback |
 | `show-tick-counter` | `true` | Overlay (top-left). Added in M1 |
 | `log-inputs` | `true` | Debug, M1. Turn the default off before release |
@@ -233,7 +234,7 @@ when triggers and objects are dense.
 | M0 ✅ | Geode v6 alpha SDK + scaffold, check the hooks against the 2.2091 bindings | Mod loads in 2.2091 and logs a message |
 | M1 ✅ | Tick counter overlay + log every applied input | Tick = +2 per step; CBS confirmed as the only source of half-steps and forced off every frame |
 | M2 ✅ | Recording (normal mode) with Phys snapshots: `MacroManager` + `Macro`, temporary `macro-mode` setting (Off/Record), duplicate filter, practice cut-back, text dump on completion | Stereo Madness: 324 inputs, end tick 41138 (85.70 s at 480 ticks/s). Matches the log exactly apart from GD's own tick-2 release (dropped on purpose). No odd ticks, press/release always alternate |
-| M3 | InputScheduler + playback + physics correction | Easy level replays to 100% several times in a row |
+| M3 ✅ | Playback + physics correction. Verified: Stereo Madness replayed to 100% with correction off and on; 324/324 inputs, 0 late, max drift 0.000000 in x, y and y-velocity. Built: macro inputs applied right after `processQueuedButtons` when tick == frame (fallback after `processCommands`, counted as "late"); player's presses blocked; drift measured before every correction; plays the latest completed recording (memory, else newest dump file). Also added: pause-menu "DB" button that opens the settings, and the tick overlay freezes at level complete and shows REC/PLAY. The scheduler is still a cursor over the macro; the general InputScheduler for Dynamic comes in M9 | Easy level replays to 100% several times in a row, first with correction off (pure frame accuracy), then on |
 | M4 | Precise checkpoints | Load test from §5 passes |
 | M5 | Practice-mode recording (cut-back + re-press) | Practice-recorded macro replays in normal mode |
 | M6 | GDR2 save/load + pause-menu UI | Round-trip works; a `.gdr2` from another bot plays back |

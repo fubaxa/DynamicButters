@@ -5,12 +5,33 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <sstream>
 
 #include "debug/Settings.hpp"
 
 using namespace geode::prelude;
 
 namespace db {
+	namespace {
+		char const* modeName(MacroMode m) {
+			switch (m) {
+				case MacroMode::Record: return "Record";
+				case MacroMode::Playback: return "Playback";
+				default: return "Off";
+			}
+		}
+
+		double angleDiff(double a, double b) {
+			double d = std::fmod(std::abs(a - b), 360.0);
+			return std::min(d, 360.0 - d);
+		}
+
+		auto recordingsDir() {
+			return Mod::get()->getSaveDir() / "recordings";
+		}
+	}
+
 	MacroManager& MacroManager::get() {
 		static MacroManager instance;
 		return instance;
@@ -22,25 +43,70 @@ namespace db {
 
 	void MacroManager::readModeSetting() {
 		auto value = Mod::get()->getSettingValue<std::string>("macro-mode");
-		auto mode = value == "Record" ? MacroMode::Record : MacroMode::Off;
-		if (mode != m_mode) {
-			log::info("macro: mode {} -> {}", m_mode == MacroMode::Record ? "Record" : "Off", value);
-			m_mode = mode;
+		auto mode = value == "Record" ? MacroMode::Record
+			: value == "Playback" ? MacroMode::Playback
+			: MacroMode::Off;
+		if (mode == m_mode) return;
+
+		log::info("macro: mode {} -> {}", modeName(m_mode), modeName(mode));
+		m_mode = mode;
+		m_play.reset();
+		if (m_mode == MacroMode::Playback) {
+			// Most recent completed recording of this level: from memory, else from disk.
+			auto it = m_completed.find(m_macro.levelID);
+			if (it != m_completed.end()) {
+				m_play = it->second;
+				log::info("playback: using the recording made this session ({} inputs)", m_play->inputs.size());
+			} else if (auto loaded = loadLatestDump(m_macro.levelID)) {
+				m_play = std::move(loaded);
+			} else {
+				log::warn("playback: no completed recording found for level {}, playback is inactive", m_macro.levelID);
+			}
 		}
 	}
 
 	void MacroManager::onLevelStart(GJGameLevel* level) {
-		readModeSetting();
 		m_macro = Macro{};
 		m_macro.levelID = level->m_levelID.value();
 		m_macro.levelName = level->m_levelName;
 		m_held[0] = m_held[1] = false;
 		m_dropped = 0;
+		// Force a fresh mode read (and playback load) for this level.
+		m_mode = MacroMode::Off;
+		m_play.reset();
+		m_stats = {};
+		m_cursor = 0;
+		readModeSetting();
 	}
 
 	void MacroManager::onAttemptStart(PlayLayer* pl, uint32_t tick, bool practice) {
-		// Mode changes apply here, at the start of an attempt, so an attempt is never half recorded.
-		if (tick == 0) readModeSetting();
+		// Mode changes apply here, at the start of an attempt, so an attempt is never half recorded/played.
+		if (tick == 0) {
+			if (isPlaying() && m_stats.dispatched > 0) logPlaybackSummary("attempt ended");
+			readModeSetting();
+		}
+
+		if (isPlaying()) {
+			auto& in = m_play->inputs;
+			if (tick == 0) {
+				m_cursor = 0;
+				m_stats = {};
+			} else {
+				// Practice respawn: continue with the first input after the checkpoint.
+				m_cursor = std::upper_bound(in.begin(), in.end(), tick,
+					[](uint32_t t, MacroInput const& mi) { return t < mi.frame; }) - in.begin();
+			}
+			m_playHeld[0] = m_playHeld[1] = false;
+			for (size_t i = 0; i < m_cursor; ++i) m_playHeld[in[i].player2 ? 1 : 0] = in[i].down;
+			if (tick != 0 && (m_playHeld[0] || m_playHeld[1])) {
+				// GD may not treat the button as held after a respawn; handled properly in M5.
+				log::warn("playback: macro was holding a button at checkpoint tick {}; may desync (M5)", tick);
+			}
+			log::info("playback: attempt from tick {} (practice={}), next input #{} of {}",
+				tick, practice, m_cursor, in.size());
+			return;
+		}
+
 		if (!isRecording()) return;
 
 		if (tick == 0) {
@@ -98,25 +164,101 @@ namespace db {
 	}
 
 	void MacroManager::onLevelComplete(PlayLayer* pl, uint32_t tick) {
+		if (isPlaying()) {
+			logPlaybackSummary("level complete");
+			return;
+		}
 		if (!isRecording()) return;
 		m_macro.endFrame = tick;
 		uint32_t presses = 0;
 		for (auto const& in : m_macro.inputs) presses += in.down;
 		log::info("record: level complete at tick {} ({:.2f} s): {} inputs ({} presses), {} duplicates dropped",
 			tick, tick / (2.0 * m_macro.framerate), m_macro.inputs.size(), presses, m_dropped);
+		m_completed[m_macro.levelID] = m_macro;
 		writeDump("complete");
 	}
 
 	void MacroManager::onQuit() {
+		if (isPlaying() && m_stats.dispatched > 0) logPlaybackSummary("left the level");
 		if (isRecording() && !m_macro.inputs.empty() && m_macro.endFrame == 0) {
 			log::info("record: left the level without completing it ({} inputs, not saved)", m_macro.inputs.size());
 		}
 	}
 
-	// Temporary human-readable dump so M2 recordings can be checked by eye.
+	// ---------------------------------------------------------------- playback
+
+	bool MacroManager::shouldBlockExternalInput(bool down, bool player2) const {
+		if (!isPlaying()) return false;
+		// Block every press that isn't the macro's. Let a release through only if the macro isn't
+		// holding that key: that keeps GD's own release at the start of each attempt (which also
+		// happened while recording), but stops a stray key release from cutting a macro hold short.
+		if (down) return true;
+		return m_playHeld[player2 ? 1 : 0];
+	}
+
+	void MacroManager::dispatchDue(GJBaseGameLayer* gl, uint32_t tick, bool late) {
+		if (!isPlaying() || !gl) return;
+		auto const& inputs = m_play->inputs;
+		bool twoPlayer = gl->m_levelSettings && gl->m_levelSettings->m_twoPlayerMode;
+		bool correct = settings::physicsCorrection();
+		bool logEach = settings::logInputs();
+
+		while (m_cursor < inputs.size() && inputs[m_cursor].frame <= tick) {
+			auto const& mi = inputs[m_cursor++];
+			if (late || mi.frame < tick) {
+				m_stats.late++;
+				log::warn("playback: input #{} for tick {} applied late at tick {} ({})",
+					m_cursor - 1, mi.frame, tick, late ? "after the step" : "missed step");
+			}
+
+			PlayerObject* p = (!mi.player2 || !twoPlayer) ? gl->m_player1 : gl->m_player2;
+			if (p) {
+				double dx = std::abs(p->m_position.x - mi.phys.x);
+				double dy = std::abs(p->m_position.y - mi.phys.y);
+				double dyv = std::abs(p->m_yVelocity - mi.phys.yVel);
+				double drot = angleDiff(p->getRotation(), mi.phys.rotation);
+				if (dx > m_stats.maxDx) { m_stats.maxDx = dx; m_stats.maxAtTick = mi.frame; }
+				m_stats.maxDy = std::max(m_stats.maxDy, dy);
+				m_stats.maxDyVel = std::max(m_stats.maxDyVel, dyv);
+				m_stats.maxDrot = std::max(m_stats.maxDrot, drot);
+				if (logEach) {
+					log::info("play: {} key={} tick={} drift dx={:.6f} dy={:.6f} dyVel={:.6f} drot={:.4f}{}",
+						mi.down ? "PRESS  " : "RELEASE", mi.player2 ? "P2" : "P1", mi.frame,
+						dx, dy, dyv, drot, correct ? " (corrected)" : "");
+				}
+				if (correct) {
+					cocos2d::CCPoint pos{mi.phys.x, mi.phys.y};
+					p->m_position = pos;
+					p->setPosition(pos);
+					p->setRotation(mi.phys.rotation);
+					p->m_yVelocity = mi.phys.yVel;
+					m_stats.corrected++;
+				}
+			}
+
+			m_playHeld[mi.player2 ? 1 : 0] = mi.down;
+			m_dispatching = true;
+			gl->handleButton(mi.down, mi.button, !mi.player2);
+			m_dispatching = false;
+			m_stats.dispatched++;
+		}
+	}
+
+	void MacroManager::logPlaybackSummary(char const* reason) {
+		if (!m_play) return;
+		log::info(
+			"playback: {} - {} of {} inputs applied, {} late, {} corrected; max drift before correction "
+			"dx={:.6f} (at tick {}) dy={:.6f} dyVel={:.6f} drot={:.4f}",
+			reason, m_stats.dispatched, m_play->inputs.size(), m_stats.late, m_stats.corrected,
+			m_stats.maxDx, m_stats.maxAtTick, m_stats.maxDy, m_stats.maxDyVel, m_stats.maxDrot);
+	}
+
+	// ---------------------------------------------------------------- debug dump (until GDR2 in M6)
+
+	// Temporary human-readable dump so recordings can be checked by eye and replayed after a restart.
 	// Replaced by real .gdr2 save/load in M6.
 	void MacroManager::writeDump(char const* reason) const {
-		auto dir = Mod::get()->getSaveDir() / "recordings";
+		auto dir = recordingsDir();
 		if (auto res = file::createDirectoryAll(dir); !res) {
 			log::error("record: could not create {}: {}", dir.string(), res.unwrapErr());
 			return;
@@ -131,7 +273,8 @@ namespace db {
 			m_macro.levelID, m_macro.levelName, m_macro.framerate, m_macro.endFrame, m_macro.inputs.size());
 		out += "# tick  action   key  x            y            rot        xVel        yVel\n";
 		for (auto const& in : m_macro.inputs) {
-			out += fmt::format("{:>6}  {:<7}  {}   {:<12.6f} {:<12.6f} {:<10.4f} {:<11.6f} {:.6f}\n",
+			// 9 significant digits round-trip a float exactly; 17 do for a double.
+			out += fmt::format("{:>6}  {:<7}  {}   {:<14.9g} {:<14.9g} {:<12.9g} {:<20.17g} {:.17g}\n",
 				in.frame, in.down ? "PRESS" : "RELEASE", in.player2 ? "P2" : "P1",
 				in.phys.x, in.phys.y, in.phys.rotation, in.phys.xVel, in.phys.yVel);
 		}
@@ -141,5 +284,58 @@ namespace db {
 			return;
 		}
 		log::info("record: wrote {}", path.string());
+	}
+
+	std::optional<Macro> MacroManager::loadLatestDump(int levelID) const {
+		auto entries = file::readDirectory(recordingsDir());
+		if (!entries) return std::nullopt;
+
+		// Files are "<levelID>_<unix seconds>_complete.txt"; pick the newest for this level.
+		std::string prefix = fmt::format("{}_", levelID);
+		std::string bestPath;
+		long long bestStamp = -1;
+		for (auto const& entry : entries.unwrap()) {
+			auto full = entry.string();
+			auto slash = full.find_last_of("/\\");
+			auto name = slash == std::string::npos ? full : full.substr(slash + 1);
+			if (!name.starts_with(prefix) || !name.ends_with("_complete.txt")) continue;
+			auto stampStr = name.substr(prefix.size(), name.size() - prefix.size() - std::string("_complete.txt").size());
+			long long stamp = -1;
+			try { stamp = std::stoll(stampStr); } catch (...) { continue; }
+			if (stamp > bestStamp) { bestStamp = stamp; bestPath = full; }
+		}
+		if (bestPath.empty()) return std::nullopt;
+
+		auto text = file::readString(bestPath);
+		if (!text) {
+			log::error("playback: could not read {}: {}", bestPath, text.unwrapErr());
+			return std::nullopt;
+		}
+
+		Macro macro;
+		macro.levelID = levelID;
+		std::istringstream lines(text.unwrap());
+		std::string line;
+		while (std::getline(lines, line)) {
+			if (line.empty()) continue;
+			if (line[0] == '#') {
+				if (auto pos = line.find("end tick "); pos != std::string::npos) {
+					macro.endFrame = static_cast<uint32_t>(std::stoul(line.substr(pos + 9)));
+				}
+				continue;
+			}
+			std::istringstream row(line);
+			MacroInput in;
+			std::string action, key;
+			if (!(row >> in.frame >> action >> key >> in.phys.x >> in.phys.y >> in.phys.rotation >> in.phys.xVel >> in.phys.yVel)) {
+				log::warn("playback: skipping bad line in {}: {}", bestPath, line);
+				continue;
+			}
+			in.down = action == "PRESS";
+			in.player2 = key == "P2";
+			macro.inputs.push_back(in);
+		}
+		log::info("playback: loaded {} ({} inputs, end tick {})", bestPath, macro.inputs.size(), macro.endFrame);
+		return macro;
 	}
 }
