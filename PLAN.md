@@ -32,7 +32,22 @@ Status after M0:
                                         [Dynamic]  (later: moves a user click to a later tick)
 ```
 
-- **Frame = physics tick** (`m_gameState.m_currentProgress`, 240/s). It doesn't depend on FPS.
+- **Frame = `m_gameState.m_currentProgress`.** Measured in M1: it goes up by **2 per physics step**
+  (about 480/s) and by 1 on half-steps (`isHalfTick`), so it counts in half-steps. It only changes inside
+  `processCommands`, and never jumped. Store it as-is: the extra resolution costs nothing.
+- **Confirmed in M1: CBS is the only cause of half-steps.** With CBS on, a press that lands mid-step
+  splits that step into two halves (e.g. 716→717→718), and the input is applied between them. The
+  logged tick is still the step's end tick (718), so **the recorded tick doesn't capture where in the
+  step the click landed**. With CBS forced off: 0 half-steps over 2 runs (~100 inputs), and every input
+  fell on an even tick. So recording and playback **must** run with CBS off (§7.6).
+- **Confirmed in M1: GD restores the tick on checkpoint load** (`resetLevel` → 0, then
+  `loadFromCheckpoint` → the checkpoint's tick). Precise checkpoints don't need to manage the tick themselves.
+- **M1 respawn data:** respawning from the same checkpoint gives exactly the same state every time,
+  down to 6 decimals, and the state 60 steps later is identical too (when there were no clicks). But the
+  respawn state is **not** the state logged at `createCheckpoint`. x is consistently about +1.298
+  higher (roughly one step's worth of movement), and y differs when airborne (by −0.40 and −0.98);
+  y-velocity and rotation match. This may be real GD offset or just where in the step the checkpoint
+  log runs. Settle it in M4 by comparing a respawned run against the original run at the same tick.
 - **Recording** saves the tick at which GD *actually applied* the input (inside `handleButton`).
 - **Playback** fires `handleButton` at the start of the matching tick and blocks the player's own inputs.
 - **Physics correction:** the most precise bots also save player position, rotation and velocity at
@@ -177,6 +192,20 @@ when triggers and objects are dense.
 2. **Duplicate inputs:** ignore a press while already pressed, and a release while already released.
 3. **Determinism log:** a debug toggle that logs `(tick, x, y, yVel)` every 240 ticks for record vs playback.
 4. **Physics bypass / TPS:** save the framerate in the file; refuse playback if it differs.
+6. **Click Between Steps (vanilla CBS) and Click Between Frames (CBF mod).** Both change when inputs
+   land inside a step, and CBS is confirmed as the cause of the half-steps seen in M1. While recording or
+   playing back, the mod turns CBS off by setting `GJBaseGameLayer::m_clickBetweenSteps = false` on
+   that PlayLayer only. The saved GD option and the level's `m_cbsOverride` are left alone.
+   **This has to be enforced every frame** (in `GJBaseGameLayer::update`, before physics runs). In M1
+   GD turned the flag back on mid-level, probably when the option was toggled from the pause menu,
+   and setting it once at init didn't hold. Every half-step seen so far happened with the flag on, so
+   it is the right switch. CBF is
+   skipped for now because it hasn't been updated to 2.2091; once it is, it gets disabled or detected
+   the same way.
+7. **P1/P2 keys.** `handleButton`'s third argument is the *key* used (the up arrow is the P2 key by
+   default). In 1-player levels both keys control player 1. Macros store the flag exactly as GD gives
+   it, which maps directly onto GDR2's separate P1 and P2 input lists, and playback passes it back
+   unchanged. That gives 2-player support almost for free later.
 5. **Safe mode** (mod setting, **on by default**, can be turned off): any attempt that used playback,
    Dynamic or a seek snapshot can't save progress or completion or submit to leaderboards. Show a small
    "Safe mode" label in-game while it's active.
@@ -190,7 +219,9 @@ when triggers and objects are dense.
 | `safe-mode` | `true` | Turn off at your own risk |
 | `precise-checkpoints` | `true` | |
 | `physics-correction` | `true` | Apply "Phys" snapshots during playback |
-| `show-tick-counter` | `false` | Overlay |
+| `show-tick-counter` | `true` | Overlay (top-left). Added in M1 |
+| `log-inputs` | `true` | Debug, M1. Turn the default off before release |
+| `tick-probe` | `true` | Debug, M1. Turn the default off before release |
 | `macro-folder` | save dir `/macros` | |
 
 ---
@@ -199,9 +230,9 @@ when triggers and objects are dense.
 
 | # | Milestone | Done when |
 |---|---|---|
-| M0 | Geode v6 alpha SDK + scaffold, check the hooks against the 2.2091 bindings | Mod loads in 2.2091 and logs a message |
-| M1 | Tick counter overlay + log every applied input | Same click spot gives the same tick across attempts; confirm one tick per `processCommands` |
-| M2 | Recording (normal mode) with Phys snapshots | Input list matches what you clicked |
+| M0 ✅ | Geode v6 alpha SDK + scaffold, check the hooks against the 2.2091 bindings | Mod loads in 2.2091 and logs a message |
+| M1 ✅ | Tick counter overlay + log every applied input | Tick = +2 per step; CBS confirmed as the only source of half-steps and forced off every frame |
+| M2 ✅ | Recording (normal mode) with Phys snapshots: `MacroManager` + `Macro`, temporary `macro-mode` setting (Off/Record), duplicate filter, practice cut-back, text dump on completion | Stereo Madness: 324 inputs, end tick 41138 (85.70 s at 480 ticks/s). Matches the log exactly apart from GD's own tick-2 release (dropped on purpose). No odd ticks, press/release always alternate |
 | M3 | InputScheduler + playback + physics correction | Easy level replays to 100% several times in a row |
 | M4 | Precise checkpoints | Load test from §5 passes |
 | M5 | Practice-mode recording (cut-back + re-press) | Practice-recorded macro replays in normal mode |

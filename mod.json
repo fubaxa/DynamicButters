@@ -7,5 +7,38 @@
 	"name": "DynamicButter",
 	"version": "v0.1.0",
 	"developer": "fubaxa",
-	"description": "Frame-accurate macros and the Dynamic click-window trainer."
+	"description": "Frame-accurate macros and the Dynamic click-window trainer.",
+	"settings": {
+		"macro-mode": {
+			"type": "string",
+			"default": "Off",
+			"one-of": ["Off", "Record"],
+			"name": "Macro mode",
+			"description": "Temporary control until the pause-menu UI exists. Record: records your inputs, and a text dump is written to the mod's save folder when you complete the level. Takes effect at the start of the next attempt."
+		},
+		"show-tick-counter": {
+			"type": "bool",
+			"default": true,
+			"name": "Show tick counter",
+			"description": "Shows the current physics tick (240 per second) in the top-left corner while playing."
+		},
+		"log-inputs": {
+			"type": "bool",
+			"default": true,
+			"name": "Log inputs",
+			"description": "Debug: logs every input GD applies, with its tick and player position."
+		},
+		"tick-probe": {
+			"type": "bool",
+			"default": true,
+			"name": "Tick probe",
+			"description": "Debug: logs once per second whether the tick counter advances exactly once per physics step."
+		},
+		"force-disable-cbs": {
+			"type": "bool",
+			"default": false,
+			"name": "Force-disable Click Between Steps",
+			"description": "Debug: keeps Click Between Steps off while playing, without changing your saved GD setting. Recording always does this on its own."
+		}
+	}
 }
