@@ -142,7 +142,7 @@ namespace db {
 
 		// Mode changes apply here, at the start of an attempt, so an attempt is never half recorded/played.
 		if (fresh) {
-			if (isPlaying() && m_stats.dispatched > 0) logPlaybackSummary("attempt ended");
+			if (isPlaying() && m_stats.dispatched > 0 && !m_quiet) logPlaybackSummary("attempt ended");
 			applyPending();
 		}
 
@@ -172,10 +172,10 @@ namespace db {
 			if (fresh && atStartPos) {
 				// The macro is holding at the start position: press right away (dispatchDue).
 				for (int k = 0; k < 2; ++k) m_startPress[k] = m_playHeld[k];
-			} else if (!fresh && (m_playHeld[0] || m_playHeld[1])) {
+			} else if (!fresh && !m_quiet && (m_playHeld[0] || m_playHeld[1])) {
 				log::warn("playback: macro was holding a button at checkpoint tick {}; may desync", tick);
 			}
-			log::info("playback: attempt from tick {} (macro tick {}, practice={}{}), next input #{} of {}",
+			if (!m_quiet) log::info("playback: attempt from tick {} (macro tick {}, practice={}{}), next input #{} of {}",
 				tick, macroTick, practice, atStartPos ? ", start position" : "", m_cursor, in.size());
 			return;
 		}
@@ -349,8 +349,8 @@ namespace db {
 		if (!isPlaying() || !gl) return;
 		auto const& inputs = m_play->inputs;
 		bool twoPlayer = gl->m_levelSettings && gl->m_levelSettings->m_twoPlayerMode;
-		bool correct = settings::physicsCorrection();
-		bool logEach = settings::logInputs();
+		bool correct = settings::physicsCorrection() && !m_quiet;
+		bool logEach = settings::logInputs() && !m_quiet;
 
 		// Start position where the macro is mid-hold: press first.
 		for (int k = 0; k < 2; ++k) {
@@ -368,7 +368,7 @@ namespace db {
 			auto const& mi = inputs[m_cursor++];
 			if (late || int64_t(mi.frame) < macroTick) {
 				m_stats.late++;
-				log::warn("playback: input #{} for tick {} applied late at tick {} ({})",
+				if (!m_quiet) log::warn("playback: input #{} for tick {} applied late at tick {} ({})",
 					m_cursor - 1, mi.frame, tick, late ? "after the step" : "missed step");
 			}
 
@@ -528,6 +528,36 @@ namespace db {
 			log::error("startpos: saving {} failed: {}", m_playPath, res.unwrapErr());
 		} else {
 			log::info("startpos: saved {} start positions to {}", ticks.size(), store::fileNameOf(m_playPath));
+		}
+	}
+
+	void MacroManager::setTrialInputs(std::vector<MacroInput> inputs) {
+		if (!m_play) return;
+		if (!m_savedInputs) m_savedInputs = m_play->inputs;
+		m_play->inputs = std::move(inputs);
+	}
+
+	void MacroManager::restoreInputs() {
+		if (m_play && m_savedInputs) m_play->inputs = std::move(*m_savedInputs);
+		m_savedInputs.reset();
+	}
+
+	void MacroManager::saveWindows(std::vector<MacroInput> scanned) {
+		restoreInputs();
+		if (!m_play) return;
+		m_play->inputs = std::move(scanned);
+		if (m_lastRecording && m_lastRecording->recordedAt == m_play->recordedAt
+			&& m_lastRecording->isFor(m_play->levelID, m_play->levelName)) {
+			m_lastRecording->inputs = m_play->inputs;
+		}
+		if (m_playPath.empty()) {
+			log::warn("dynamic: macro has no file; windows are kept for this session only");
+			return;
+		}
+		if (auto res = store::overwrite(m_playPath, *m_play); !res) {
+			log::error("dynamic: saving windows to {} failed: {}", m_playPath, res.unwrapErr());
+		} else {
+			log::info("dynamic: saved windows to {}", store::fileNameOf(m_playPath));
 		}
 	}
 

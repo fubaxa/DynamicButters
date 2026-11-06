@@ -11,7 +11,7 @@ namespace db::gdr2 {
 	namespace {
 		constexpr int FORMAT_VERSION = 2;
 		constexpr int GAME_VERSION = 22091;
-		constexpr uint64_t EXT_VERSION = 3; // 2: + start ticks, 3: + x path
+		constexpr uint64_t EXT_VERSION = 4; // 2: + start ticks, 3: + x path, 4: + Dynamic windows
 		constexpr char const* PHYS_TAG = "Phys";
 		constexpr uint64_t MAX_STRING = 0xFFFF; // same limit as the reference reader
 
@@ -141,6 +141,21 @@ namespace db::gdr2 {
 			ext.raw<float>(p.x);
 			prevPathTick = p.tick;
 		}
+		// v4: Dynamic windows of scanned inputs (tick delta, key bits, early, late, flags); matched to
+		// inputs by (tick, key, press/release) when read, since the file reorders P1/P2 inputs.
+		size_t scanned = std::count_if(macro.inputs.begin(), macro.inputs.end(),
+			[](MacroInput const& in) { return in.window.scanned; });
+		ext.varint(scanned);
+		uint64_t prevWinTick = 0;
+		for (auto const& in : macro.inputs) {
+			if (!in.window.scanned) continue;
+			ext.varint(in.frame - prevWinTick);
+			ext.varint((in.player2 ? 2u : 0u) | (in.down ? 1u : 0u));
+			ext.varint(in.window.early);
+			ext.varint(in.window.late);
+			ext.varint(in.window.flags);
+			prevWinTick = in.frame;
+		}
 		w.block(ext);
 
 		w.varint(0); // deaths
@@ -199,6 +214,8 @@ namespace db::gdr2 {
 		m.levelID = static_cast<int>(static_cast<uint32_t>(r.varint()));
 		m.levelName = r.str();
 
+		struct WinEntry { uint32_t tick; uint64_t bits; InputWindow w; };
+		std::vector<WinEntry> wins;
 		auto ext = r.block();
 		if (m.botName == BOT_NAME) {
 			auto extVersion = ext.varint();
@@ -224,6 +241,22 @@ namespace db::gdr2 {
 					m.path.push_back({static_cast<uint32_t>(t), x});
 				}
 				if (!ext.ok()) m.path.clear();
+			}
+			if (extVersion >= 4) {
+				auto count = ext.varint();
+				uint64_t t = 0;
+				for (uint64_t i = 0; i < count && ext.ok(); ++i) {
+					WinEntry e;
+					t += ext.varint();
+					e.tick = static_cast<uint32_t>(t);
+					e.bits = ext.varint();
+					e.w.scanned = true;
+					e.w.early = static_cast<uint8_t>(ext.varint());
+					e.w.late = static_cast<uint8_t>(ext.varint());
+					e.w.flags = static_cast<uint8_t>(ext.varint());
+					wins.push_back(e);
+				}
+				if (!ext.ok()) wins.clear();
 			}
 		}
 
@@ -275,6 +308,19 @@ namespace db::gdr2 {
 		}
 		std::stable_sort(m.inputs.begin(), m.inputs.end(),
 			[](MacroInput const& a, MacroInput const& b) { return a.frame < b.frame; });
+
+		// Attach Dynamic windows to their inputs (both lists are sorted by tick).
+		size_t from = 0;
+		for (auto const& e : wins) {
+			while (from < m.inputs.size() && m.inputs[from].frame < e.tick) from++;
+			for (size_t j = from; j < m.inputs.size() && m.inputs[j].frame == e.tick; ++j) {
+				auto& in = m.inputs[j];
+				if (in.player2 == ((e.bits & 2) != 0) && in.down == ((e.bits & 1) != 0)) {
+					in.window = e.w;
+					break;
+				}
+			}
+		}
 
 		if (platformer) {
 			auto before = m.inputs.size();

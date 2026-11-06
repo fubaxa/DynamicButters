@@ -13,6 +13,7 @@
 #include "safety/SafeMode.hpp"
 #include "macro/Seek.hpp"
 #include "macro/SmartStartPos.hpp"
+#include "dynamic/WindowScan.hpp"
 
 using namespace geode::prelude;
 
@@ -84,6 +85,10 @@ class $modify(DBPlayLayer, PlayLayer) {
 		label->setVisible(show);
 		if (!show) return;
 
+		if (auto scanStatus = db::scan::status(); !scanStatus.empty()) {
+			label->setString(scanStatus.c_str());
+			return;
+		}
 		auto& mgr = db::MacroManager::get();
 		char const* mode = mgr.isRecording() ? "  REC" : mgr.isPlaying() ? "  PLAY" : "";
 		if (auto end = m_fields->endTick) {
@@ -101,14 +106,16 @@ class $modify(DBPlayLayer, PlayLayer) {
 		unsigned now = m_gameState.m_currentProgress;
 		// GD has finished restoring the player here; compare with / apply the precise state first.
 		db::checkpoints::afterReset(this, now);
-		log::info("resetLevel: tick {} -> {} (practice={}, checkpoints={})",
-			before, now, m_isPracticeMode,
-			m_checkpointArray ? m_checkpointArray->count() : 0);
-		// Player state is only fully restored once resetLevel returns
-		// (at the end of loadFromCheckpoint it still holds the death position).
-		db::debug::logPlayer("respawn: state", now, m_player1);
-		db::debug::respawnTick = now;
-		db::debug::probeAtTick = now + db::debug::PROBE_DELAY;
+		if (!db::runtime::quiet) {
+			log::info("resetLevel: tick {} -> {} (practice={}, checkpoints={})",
+				before, now, m_isPracticeMode,
+				m_checkpointArray ? m_checkpointArray->count() : 0);
+			// Player state is only fully restored once resetLevel returns
+			// (at the end of loadFromCheckpoint it still holds the death position).
+			db::debug::logPlayer("respawn: state", now, m_player1);
+			db::debug::respawnTick = now;
+			db::debug::probeAtTick = now + db::debug::PROBE_DELAY;
+		}
 		db::MacroManager::get().onAttemptStart(this, now, m_isPracticeMode);
 		db::safe::onAttemptStart(now);
 		db::speedprobe::onAttemptStart(this, now);
@@ -117,6 +124,7 @@ class $modify(DBPlayLayer, PlayLayer) {
 	}
 
 	void levelComplete() {
+		if (db::scan::onLevelComplete()) return; // a scan trial reached the end: passed
 		unsigned tick = m_gameState.m_currentProgress;
 		m_fields->endTick = tick;
 		db::MacroManager::get().onLevelComplete(this, tick);
@@ -129,6 +137,7 @@ class $modify(DBPlayLayer, PlayLayer) {
 
 	// GD saves a new best % when the player dies.
 	void destroyPlayer(PlayerObject* player, GameObject* object) {
+		if (db::scan::onPlayerDied(this, object)) return; // a scan trial failed; no GD death
 		applySafeMode();
 		PlayLayer::destroyPlayer(player, object);
 		if (player && player->m_isDead) db::seek::onPlayerDied();
@@ -150,6 +159,7 @@ class $modify(DBPlayLayer, PlayLayer) {
 		db::MacroManager::get().onQuit();
 		db::cptest::logSummary("left the level");
 		db::seek::abort("left the level");
+		db::scan::abort("left the level");
 		PlayLayer::onQuit();
 	}
 
@@ -169,7 +179,7 @@ class $modify(DBPlayLayer, PlayLayer) {
 		unsigned before = m_gameState.m_currentProgress;
 		PlayLayer::loadFromCheckpoint(object);
 		db::checkpoints::onLoad(object);
-		log::info("loadFromCheckpoint: tick {} -> {}", before, m_gameState.m_currentProgress);
+		if (!db::runtime::quiet) log::info("loadFromCheckpoint: tick {} -> {}", before, m_gameState.m_currentProgress);
 	}
 
 	CheckpointObject* createCheckpoint() {

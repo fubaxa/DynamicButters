@@ -14,6 +14,7 @@
 #include "macro/MacroStore.hpp"
 #include "safety/SafeMode.hpp"
 #include "macro/Seek.hpp"
+#include "dynamic/WindowScan.hpp"
 
 using namespace geode::prelude;
 
@@ -374,6 +375,89 @@ namespace db::ui {
 		}
 	};
 
+	// ------------------------------------------------------------ Dynamic
+
+	class DynamicPopup : public DBPopup {
+	public:
+		static DynamicPopup* create(geode::Function<void()> closeParent) {
+			auto ret = new DynamicPopup();
+			ret->m_closeParent = std::move(closeParent);
+			if (ret->initDynamic()) {
+				ret->autorelease();
+				return ret;
+			}
+			delete ret;
+			return nullptr;
+		}
+
+	protected:
+		geode::Function<void()> m_closeParent;
+
+		bool initDynamic() {
+			constexpr float W = 380.f, H = 240.f;
+			if (!initPopup(W, H, "Dynamic")) return false;
+			auto& mgr = MacroManager::get();
+			mgr.ensurePlayMacro();
+			auto const& play = mgr.playMacro();
+
+			std::string text;
+			if (!play) {
+				text = "No macro for this level.\nRecord one, or pick one with Load.";
+			} else {
+				size_t presses = 0, scanned = 0, scannedPresses = 0, frames = 0;
+				for (auto const& in : play->inputs) {
+					presses += in.down;
+					if (!in.window.scanned) continue;
+					scanned++;
+					if (in.down && !(in.window.flags & InputWindow::BaselineFailed)) {
+						scannedPresses++;
+						frames += in.window.early + in.window.late + 1;
+					}
+				}
+				text = fmt::format("{}\n{} inputs ({} clicks)\n", mgr.playSource(), play->inputs.size(), presses);
+				if (scanned == 0) {
+					text += "Windows: not scanned yet\n";
+				} else {
+					text += fmt::format("Windows: {} of {} inputs scanned, average click window {:.1f} frames\n",
+						scanned, play->inputs.size(), scannedPresses ? double(frames) / scannedPresses : 0.0);
+				}
+				text += fmt::format("\nScan: restarts in practice mode and tests every click up to\n{} steps earlier and later (1 step = 1/240 s). It can take a while;\nprogress shows at the top left. Report: <macro>.windows.txt",
+					Mod::get()->getSettingValue<int64_t>("dynamic-scan-range"));
+			}
+			auto info = label(text, "chatFont.fnt", 0.65f);
+			info->setAlignment(kCCTextAlignmentCenter);
+			limitNodeSize(info, {W - 30.f, H - 90.f}, 0.65f, 0.2f);
+			m_mainLayer->addChildAtPosition(info, Anchor::Center, {0.f, 12.f});
+
+			std::vector<CCNode*> row;
+			auto addBtn = [&](char const* t, char const* bg, auto cb) {
+				auto btn = CCMenuItemExt::createSpriteExtra(ButtonSprite::create(t, "bigFont.fnt", bg, 0.5f), std::move(cb));
+				m_buttonMenu->addChild(btn);
+				row.push_back(btn);
+			};
+			addBtn("Scan windows", "GJ_button_01.png", [this](CCMenuItemSpriteExtra*) {
+				if (!scan::start()) return;
+				if (m_closeParent) m_closeParent();
+				this->onClose(nullptr);
+			});
+			addBtn("Folder", "GJ_button_04.png", [](CCMenuItemSpriteExtra*) {
+				auto dir = store::macrosDir();
+				(void)file::createDirectoryAll(dir);
+				file::openFolder(dir);
+			});
+			float total = 0.f;
+			for (auto n : row) total += n->getScaledContentSize().width;
+			total += 10.f * (row.size() - 1);
+			float x = (W - total) / 2.f;
+			for (auto n : row) {
+				float w = n->getScaledContentSize().width;
+				n->setPosition({x + w / 2.f, 25.f});
+				x += w + 10.f;
+			}
+			return true;
+		}
+	};
+
 	// ------------------------------------------------------------ main popup
 
 	class MacroPopup : public DBPopup {
@@ -452,6 +536,17 @@ namespace db::ui {
 				modeRow.push_back(btn);
 			}
 			layoutRow(modeRow, modeY, 10.f);
+
+			// Dynamic (hidden when the Dynamic setting is off: macro-only use)
+			if (scan::enabled()) {
+				auto dynBtn = CCMenuItemExt::createSpriteExtra(
+					ButtonSprite::create("Dynamic", "bigFont.fnt", "GJ_button_03.png", 0.45f),
+					[this](CCMenuItemSpriteExtra*) {
+						DynamicPopup::create([this] { this->onClose(nullptr); })->show();
+					});
+				m_buttonMenu->addChild(dynBtn);
+				dynBtn->setPosition({W - 12.f - dynBtn->getScaledContentSize().width / 2.f, H - 22.f});
+			}
 
 			// Speedhack row: label, on/off toggle, slider, value
 			float speedY = H - 100.f;

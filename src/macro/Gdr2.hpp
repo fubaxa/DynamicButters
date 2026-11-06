@@ -27,7 +27,8 @@
 //
 // DynamicButter replay extension: extVersion, endTick, recordedAt (unix s); version 2 adds
 // start ticks (count + delta-encoded ticks, M8 seek points); version 3 adds the x path (count +
-// (tick delta, x float) corner points, for level start positions).
+// (tick delta, x float) corner points); version 4 adds Dynamic windows (count + (tick delta,
+// key bits, early, late, flags) per scanned input).
 // Other readers skip it by its size prefix.
 
 namespace db::gdr2 {

@@ -3,6 +3,7 @@
 
 #include "safety/SafeMode.hpp"
 #include "macro/Seek.hpp"
+#include "dynamic/WindowScan.hpp"
 
 #include <chrono>
 
@@ -32,7 +33,7 @@ namespace {
 
 class $modify(DBScheduler, CCScheduler) {
 	void update(float dt) {
-		if (db::seek::wantsFastForward()) {
+		if (db::seek::wantsFastForward() || db::scan::wantsFastForward()) {
 			fastForward();
 			return;
 		}
@@ -43,15 +44,17 @@ class $modify(DBScheduler, CCScheduler) {
 		CCScheduler::update(dt * effective);
 	}
 
-	// Seek (M8): many virtual 240-FPS frames per rendered frame, each a full game update.
+	// Seek (M8) and the Dynamic window scan: many virtual 240-FPS frames per rendered frame, each a
+	// full game update.
 	void fastForward() {
 		setMusicPitch(1.f);
 		auto start = std::chrono::steady_clock::now();
 		auto budget = std::chrono::milliseconds(db::seek::BUDGET_MS);
 		unsigned frames = 0;
-		while (db::seek::wantsFastForward()) {
+		while (db::seek::wantsFastForward() || db::scan::wantsFastForward()) {
 			CCScheduler::update(db::seek::VIRTUAL_FRAME_DT);
 			db::seek::afterVirtualFrame();
+			db::scan::afterVirtualFrame();
 			if (++frames % 8 == 0 && std::chrono::steady_clock::now() - start >= budget) break;
 		}
 	}

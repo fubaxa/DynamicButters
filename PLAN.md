@@ -304,7 +304,17 @@ player takes over (Dynamic, M9) or playback continues to the end (M8's "done whe
 
 ## 10. Dynamic preview (not built now)
 
-**Next step (agreed after M8): window scan.** For each click of the macro, find its real window by
+**Window scan: built and working (`dynamic/WindowScan.cpp`).** First run, "ship challenge" (24 inputs, range 20): 328 trials, 97,094 ticks simulated in 18.4 s (5,286 ticks/s, about 11x real time); the unmodified macro passed from all 24 checkpoints (no baseline failures); tight ship clicks came out at 2-5 frames, open ones hit the range. Estimate for a 678-input level: about 9 minutes; the fast-forward budget (14 ms per rendered frame) is the obvious speed knob. `dynamic-enabled` setting
+turns all of Dynamic off (macro-only use; no Dynamic button). `dynamic-scan-range` (default 20 steps
+per side). Jobs are grouped by checkpoint tick (sorted, so the macro only ever advances); one GD
+checkpoint at a time (`markCheckpoint` creates it immediately); deaths during trials are caught in
+`destroyPlayer` before GD's death/respawn; level complete during a trial = pass; physics correction
+and per-respawn logs off while scanning. Each input: baseline (unmodified) trial, then early side,
+then late side, each until the first failure, the neighbouring input, or the range. Results:
+`InputWindow` per input (GDR2 extension v4, matched by tick/key/press when read) and
+`<macro>.windows.txt` with every input's window and the 15 tightest clicks.
+
+Agreed design: For each click of the macro, find its real window by
 simulation: fast-forward the macro (Seek), place one GD checkpoint shortly before the click (not
 inside a hold), then for each candidate frame respawn there and play the macro with only that click
 moved. Scan outward from the recorded frame (p-1, p-2, ... until the first failure; same for later

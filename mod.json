@@ -15,6 +15,24 @@
 			"name": "Safe mode",
 			"description": "An attempt that used macro playback or a speedhack other than 1.0x doesn't save progress: no new best, completion, stars, orbs, coins or leaderboard entry. Turn off at your own risk."
 		},
+		"dynamic-enabled": {
+			"type": "bool",
+			"default": true,
+			"name": "Dynamic",
+			"description": "The Dynamic trainer: the window scan (and later the click assist). Turn off to use DynamicButter purely as a macro bot: the Dynamic button disappears and nothing Dynamic runs."
+		},
+		"dynamic-scan-range": {
+			"type": "int",
+			"default": 20,
+			"min": 1,
+			"max": 60,
+			"control": {
+				"arrow-step": 1,
+				"slider": false
+			},
+			"name": "Dynamic scan range",
+			"description": "How many physics steps (1/240 s each) earlier and later the window scan tests every click. Larger finds wider windows but takes longer."
+		},
 		"smart-startpos": {
 			"type": "bool",
 			"default": true,

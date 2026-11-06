@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include "debug/Settings.hpp"
+#include "physics/PlayerState.hpp"
 
 using namespace geode::prelude;
 
@@ -51,7 +52,7 @@ namespace db::speedprobe {
 	}
 
 	void onAttemptStart(PlayLayer* pl, uint32_t tick) {
-		if (!settings::tickProbe() || !pl || !pl->m_player1) return;
+		if (!settings::tickProbe() || runtime::quiet || !pl || !pl->m_player1) return;
 		auto p = pl->m_player1;
 		s_lastSpeed = p->m_playerSpeed;
 		s_lastMult = p->m_speedMultiplier;
@@ -66,7 +67,7 @@ namespace db::speedprobe {
 	}
 
 	void onStepEnd(PlayLayer* pl, uint32_t tick) {
-		if (!settings::tickProbe() || !pl || !pl->m_player1) return;
+		if (!settings::tickProbe() || runtime::quiet || !pl || !pl->m_player1) return;
 		auto p = pl->m_player1;
 		if (p->m_playerSpeed == s_lastSpeed && p->m_speedMultiplier == s_lastMult) return;
 		log::info("speedprobe: tick {} speed {:.4f} -> {:.4f} (mult {:.4f} -> {:.4f}) at player x={:.3f} y={:.3f} hitbox {}{}",

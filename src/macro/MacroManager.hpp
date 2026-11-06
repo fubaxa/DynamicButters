@@ -56,6 +56,17 @@ namespace db {
 		// macro's inputs up to `tick`.
 		void endSeek(bool reached, uint32_t tick);
 
+		// --- Dynamic window scan ---
+		// Plays these inputs instead of the macro's (one click moved) until restoreInputs().
+		void setTrialInputs(std::vector<MacroInput> inputs);
+		void restoreInputs();
+		// Scan mode: no physics correction and no per-input / per-attempt logs.
+		void setQuiet(bool quiet) { m_quiet = quiet; }
+		bool quiet() const { return m_quiet; }
+		// Stores the scanned inputs (with their windows) in the loaded macro and saves its file.
+		void saveWindows(std::vector<MacroInput> scanned);
+		std::string const& playPath() const { return m_playPath; }
+
 		// True while the mod needs vanilla Click Between Steps off (recording, playback),
 		// or when the debug setting asks for it.
 		bool shouldForceCbsOff() const;
@@ -91,6 +102,8 @@ namespace db {
 		void saveRecording();
 		void saveStartTicks();
 		bool m_seeking = false;
+		bool m_quiet = false;
+		std::optional<std::vector<MacroInput>> m_savedInputs; // macro's own inputs during a scan trial
 		std::string m_playPath; // file m_play was loaded from / saved to (empty: not saved)
 		void logPlaybackSummary(char const* reason);
 

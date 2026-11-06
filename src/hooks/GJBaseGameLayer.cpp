@@ -85,7 +85,7 @@ class $modify(DBBaseGameLayer, GJBaseGameLayer) {
 		}
 
 		auto f = m_fields.self();
-		bool probe = db::settings::tickProbe();
+		bool probe = db::settings::tickProbe() && !db::runtime::quiet;
 		unsigned before = m_gameState.m_currentProgress;
 
 		if (probe) {
@@ -127,7 +127,7 @@ class $modify(DBBaseGameLayer, GJBaseGameLayer) {
 		db::speedprobe::onStepEnd(pl, after);
 		db::cptest::onStepEnd(pl);
 
-		if (db::debug::probeAtTick != 0 && after >= db::debug::probeAtTick) {
+		if (db::debug::probeAtTick != 0 && after >= db::debug::probeAtTick && !db::runtime::quiet) {
 			db::debug::logPlayer(
 				fmt::format("respawn: +{} after tick {}", after - db::debug::respawnTick, db::debug::respawnTick).c_str(),
 				after, m_player1);
@@ -170,7 +170,7 @@ class $modify(DBBaseGameLayer, GJBaseGameLayer) {
 
 		// During playback only the macro plays: drop the player's own inputs.
 		if (!fromMacro && mgr.shouldBlockExternalInput(down, !isPlayer1)) {
-			if (db::settings::logInputs()) {
+			if (db::settings::logInputs() && !db::runtime::quiet) {
 				log::info("input: blocked {} key={} tick={} (playback)",
 					down ? "press" : "release", isPlayer1 ? "P1" : "P2", m_gameState.m_currentProgress);
 			}
@@ -185,7 +185,7 @@ class $modify(DBBaseGameLayer, GJBaseGameLayer) {
 		// Record before calling the original, so the snapshot is the state the input was applied to.
 		mgr.onInput(m_gameState.m_currentProgress, down, button, !isPlayer1, p);
 
-		if (db::settings::logInputs() && !fromMacro) {
+		if (db::settings::logInputs() && !fromMacro && !db::runtime::quiet) {
 			log::info(
 				"input: {} btn={} key={} tick={} inStep={} betweenSteps={} x={:.4f} y={:.4f} yVel={:.6f}",
 				down ? "PRESS  " : "RELEASE", button, isPlayer1 ? "P1" : "P2",

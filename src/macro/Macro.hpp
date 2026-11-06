@@ -17,12 +17,29 @@ namespace db {
 		double yVel = 0.0;
 	};
 
+	// Dynamic (window scan): how many physics steps earlier / later this input can happen with
+	// the rest of the macro unchanged and the player still surviving past the next input.
+	struct InputWindow {
+		enum Flags : uint8_t {
+			EarlyBound = 1,      // the scan stopped at the previous input (window may be larger)
+			LateBound = 2,       // the scan stopped at the next input
+			EarlyMax = 4,        // the scan stopped at the scan range
+			LateMax = 8,
+			BaselineFailed = 16, // the unmodified macro didn't pass from the checkpoint: no window
+		};
+		bool scanned = false;
+		uint8_t early = 0; // steps (1 step = 2 ticks)
+		uint8_t late = 0;
+		uint8_t flags = 0;
+	};
+
 	struct MacroInput {
 		uint32_t frame = 0;   // m_gameState.m_currentProgress when GD applied the input (half-step units)
 		uint8_t button = 1;   // 1 = jump (platformer left/right not supported yet)
 		bool down = false;    // press / release
 		bool player2 = false; // the P2 *key* was used (in 1-player levels it still moves player 1)
 		PhysSnapshot phys;    // state right before the input was applied
+		InputWindow window;   // Dynamic window scan result
 	};
 
 	struct Macro {

@@ -29,7 +29,7 @@ namespace db::checkpoints {
 			f->p1 = PlayerState::capture(pl->m_player1);
 			f->p2 = PlayerState::capture(pl->m_player2);
 			f->valid = true;
-			log::info("checkpoint: saved at tick {} {}", f->tick, f->p1.str());
+			if (!runtime::quiet) log::info("checkpoint: saved at tick {} {}", f->tick, f->p1.str());
 		}
 	}
 
@@ -67,6 +67,7 @@ namespace db::checkpoints {
 			log::warn("checkpoint: respawn tick {} != saved tick {}", tick, f->tick);
 		}
 
+		if (runtime::quiet) return;
 		auto gd = PlayerState::capture(pl->m_player1);
 		auto d = PlayerState::diff(gd, f->p1);
 		log::info("checkpoint: GD respawn vs saved at tick {}: {}{}", tick, d.str(), d.exact() ? " (exact)" : "");
