@@ -1,0 +1,221 @@
+# DynamicButter — Macro System Plan (rev. 2)
+
+Target: **GD 2.2091**, **Geode v6.0.0-alpha** (Windows first).
+Scope of this phase: a frame-accurate **record / playback macro** controlled from the **pause menu**,
+plus **precise practice checkpoints**, built so the **Dynamic** trainer can reuse the same input pipeline.
+
+Out of scope for now: platformer. 2-player comes later, so the data model and file format already store
+player 1 and player 2 inputs separately.
+
+---
+
+## 0. Toolchain: Geode alpha for 2.2091
+
+Status after M0:
+- SDK checkout is on `v6.0.0-alpha.1` (targets GD 2.2091), with the v6 binaries installed. The 5.6.1
+  binaries are still in `bin/` for BumpscosityMod.
+- **Geode CLI 4.0.0 or newer is required.** It was updated from 3.7.4 with `scoop update geode-sdk-cli`.
+- Build: Visual Studio 18 2026 generator, x64, same as BumpscosityMod.
+- `mod.json`: `"geode": "6.0.0-alpha.1"`, `"gd": { "win": "2.2091" }`.
+- v6 API changes found so far: `geode::Popup` is no longer a template (`init(w, h)`). Expect more alpha
+  changes, so the UI is written last.
+
+---
+
+## 1. Core idea
+
+```
+ user input ──► [Input Interceptor] ──► [Input Scheduler] ──► handleButton() at exact tick
+                       │                       ▲
+                       ▼                       │
+                  [Recorder]            [Playback] (fills the schedule from a Macro)
+                                        [Dynamic]  (later: moves a user click to a later tick)
+```
+
+- **Frame = physics tick** (`m_gameState.m_currentProgress`, 240/s). It doesn't depend on FPS.
+- **Recording** saves the tick at which GD *actually applied* the input (inside `handleButton`).
+- **Playback** fires `handleButton` at the start of the matching tick and blocks the player's own inputs.
+- **Physics correction:** the most precise bots also save player position, rotation and velocity at
+  every input, and write it back during playback right after the input is applied. Any float drift is
+  wiped out at each click, so long macros and macros recorded in practice mode stay in sync. We do the same.
+- **Dynamic** (later) = a new producer for the same scheduler.
+
+---
+
+## 2. Hook points (re-check against the 2.2091 bindings)
+
+**Checked against the 2.2091 bindings during M0:**
+- `queueButton` is **inlined on Windows**, so it can't be hooked. We intercept user input in
+  `processQueuedButtons` (which drains GD's input queue each tick) and `handleButton` instead.
+- `PlayLayer::init` is now `(GJGameLevel*, bool dontCreateObjects)`. The `useReplay` argument is gone.
+- `PlayerObject::loadFromCheckpoint(PlayerCheckpoint*)` exists. GD's own `PlayerCheckpoint` is a good
+  starting point for the snapshot in §5.
+- All other hooks below exist on Windows with the signatures shown.
+
+| Hook | Purpose |
+|---|---|
+| `GJBaseGameLayer::processQueuedButtons(float dt, bool clearInputQueue)` | Where user inputs leave GD's queue. Block them during playback; Dynamic intercepts here. (`queueButton` is inlined on Windows.) |
+| `GJBaseGameLayer::handleButton(bool down, int button, bool isPlayer1)` | Record the input, its tick and the physics snapshot. |
+| `GJBaseGameLayer::processCommands(float dt, bool isHalfTick, bool isLastTick)` | Per-tick driver: fire the inputs scheduled for this tick and apply physics corrections. |
+| `PlayLayer::init(GJGameLevel*, bool)` / `onQuit` | Bind the macro to the level, reset state. |
+| `PlayLayer::resetLevel` | Reset the input cursor, release held buttons, cut the recording back. |
+| `PlayLayer::createCheckpoint` / `markCheckpoint` / `loadFromCheckpoint` / `removeCheckpoint` | Precise checkpoints (§5) and cutting the recording back to the checkpoint. |
+| `PlayLayer::levelComplete` (+ progress-saving paths) | Safe mode. |
+| `PauseLayer::customSetup` | Pause-menu button. |
+
+---
+
+## 3. File format: GDR2 (`.gdr2`)
+
+**What the precise bots use:** Mega Hack and xdBot save **`.gdr2`**, maxnut's *GD Replay Format 2*
+(zBot uses the older `.gdr`; xdBot also had its own `.xd`). GDR2 is a public, compact binary format,
+and it is the closest thing to a shared standard: converters and clickbots (ZCB3, GucciBot) read it.
+**Decision: save as GDR2.** Other tools can then read our macros, and the format has a defined place
+for physics correction data.
+
+Layout (per the `gdr2` branch source; varints are LEB128):
+
+```
+"GDR" | version=2 (varint) | inputTag (string, e.g. "Phys")
+metadata: author, description, duration(float s), gameVersion, framerate(double, 240),
+          seed, coins, ldm, platformer, botName, botVersion, levelID, levelName,
+          replayExtension (varint size + bytes)            ◄── our replay-level data goes here
+deaths:   count + frame deltas
+inputs:   totalCount, p1Count, [p1 records...], [p2 records...]   ◄── P2 already separate (good for later)
+record:   varint (frameDelta << 1 | down)  [+ varint extSize + extBytes if inputTag set]
+```
+
+- **Per-input extension "Phys"** (the standard one): `xPos, yPos, rotation (float), xVel, yVel (double)`.
+  Using the standard tag means other bots can read our physics data too.
+- **Replay extension (ours, size-prefixed so other readers skip it):** DynamicButter version,
+  safe-mode flag, checkpoint/seek snapshots (§6), and later the Dynamic per-input windows (`earliest/latest`).
+- **Implementation:** the reference library is header-only C++20 and installs with CPM
+  (`CPMAddPackage("gh:maxnut/GDReplayFormat#<commit>")`). **Its licence is unclear** (no LICENSE file was
+  found on the `gdr2` branch). Either ask the author or write our own ~200-line reader and writer from the
+  spec. Our own version also makes it easy to add the Dynamic extension. Test round-tripping against
+  files made by another bot.
+
+---
+
+## 4. Components / file layout
+
+```
+src/
+├─ main.cpp
+├─ macro/
+│  ├─ Macro.hpp                // MacroInput{frame, down, player2, PhysSnapshot}, Macro{meta, p1, p2}
+│  ├─ Gdr2.hpp/.cpp            // GDR2 read/write (+ our replay extension)
+│  ├─ MacroManager.hpp/.cpp    // singleton: Off / Record / Playback, current macro, cursor
+│  └─ InputScheduler.hpp/.cpp  // scheduled inputs, dispatch(tick), releaseAll()
+├─ physics/
+│  ├─ PlayerSnapshot.hpp/.cpp  // capture/restore full PlayerObject state
+│  └─ PreciseCheckpoints.cpp   // CheckpointObject $modify + PlayLayer checkpoint hooks
+├─ hooks/
+│  ├─ GJBaseGameLayer.cpp
+│  ├─ PlayLayer.cpp
+│  └─ PauseLayer.cpp
+└─ ui/
+   ├─ MacroPopup.cpp           // mode, stats, save/load, clear
+   └─ MacroListPopup.cpp
+```
+
+Mode changes take effect on the next `resetLevel`; Stop takes effect immediately.
+
+---
+
+## 5. Precise practice checkpoints (built into the mod)
+
+The problem: vanilla checkpoints don't fully restore player state (position, velocity and rotation lose
+precision, and some flags aren't saved), so the run after loading a checkpoint is slightly different from
+the original run. That breaks practice-recorded macros, and later it would make Dynamic's frame windows
+wrong after a respawn.
+
+Fix:
+- `$modify(CheckpointObject)` with a `PlayerSnapshot` field for P1 (and P2 later), plus the tick.
+- `createCheckpoint` → call the original, then capture: position, x/y velocity (double), rotation,
+  gravity, gamemode, mini/dual, speed, on-ground/jump-buffer flags, and anything else that turns up as
+  missing while testing.
+- `loadFromCheckpoint` → call the original, then restore the snapshot and set the tick back to
+  the checkpoint's tick. In record mode, cut the recording back to that tick and re-press any held button.
+- Test: put a checkpoint down, load it 20 times, and log `(tick, x, y, yVel)` 60 ticks later. The values
+  must be identical every time and match the original run.
+- Setting: **Precise checkpoints** (on by default). It works without macros too.
+
+---
+
+## 6. Start positions (needed for Dynamic only)
+
+You're right that *predicting* where the macro is at a start position doesn't work: the speed changes,
+the gamemode affects the hitbox, and a start position spawns with a different state than the real run.
+So we **never predict; we simulate**:
+
+**Primary: "seek" (macro start positions).**
+1. When Dynamic loads a level with a macro, play the macro from tick 0 once in **fast-forward**:
+   several hundred ticks per rendered frame, rendering and audio off, with a progress bar.
+2. On the way, save precise snapshots (§5's `PlayerSnapshot` + the game's own checkpoint state) at the
+   spots the user picked. A spot can be "where a vanilla start position is", "every N seconds", or
+   "here" chosen in a timeline UI.
+3. "Start from here" = load that snapshot as a checkpoint. The tick is known exactly, the player
+   state is exact, and the speed portals have already been passed for real.
+4. Snapshots go in the replay extension, so the seek only happens once per macro (as long as their
+   size stays reasonable).
+
+**Fallback: vanilla start position objects.** If the user insists on a real start position: the macro
+already stores each input's x-position in "Phys", so find the macro tick where the player first crosses
+the start position's x and use that as the tick offset. Speed portals and gamemodes are already in the
+recorded data, so nothing is predicted. Accuracy is ±1 tick, and the start position's spawn state
+(y-velocity 0, etc.) can still make the run differ. Show this as "approximate".
+
+Open item: fast-forward speed. A 2-minute level is ~29k ticks; check how many ticks per frame GD can run
+when triggers and objects are dense.
+
+---
+
+## 7. Hard parts
+
+1. **Held buttons across reset/death:** `releaseAll()` on reset; re-press when loading a checkpoint while held.
+2. **Duplicate inputs:** ignore a press while already pressed, and a release while already released.
+3. **Determinism log:** a debug toggle that logs `(tick, x, y, yVel)` every 240 ticks for record vs playback.
+4. **Physics bypass / TPS:** save the framerate in the file; refuse playback if it differs.
+5. **Safe mode** (mod setting, **on by default**, can be turned off): any attempt that used playback,
+   Dynamic or a seek snapshot can't save progress or completion or submit to leaderboards. Show a small
+   "Safe mode" label in-game while it's active.
+
+---
+
+## 8. Settings (`mod.json`)
+
+| Key | Default | Notes |
+|---|---|---|
+| `safe-mode` | `true` | Turn off at your own risk |
+| `precise-checkpoints` | `true` | |
+| `physics-correction` | `true` | Apply "Phys" snapshots during playback |
+| `show-tick-counter` | `false` | Overlay |
+| `macro-folder` | save dir `/macros` | |
+
+---
+
+## 9. Milestones
+
+| # | Milestone | Done when |
+|---|---|---|
+| M0 | Geode v6 alpha SDK + scaffold, check the hooks against the 2.2091 bindings | Mod loads in 2.2091 and logs a message |
+| M1 | Tick counter overlay + log every applied input | Same click spot gives the same tick across attempts; confirm one tick per `processCommands` |
+| M2 | Recording (normal mode) with Phys snapshots | Input list matches what you clicked |
+| M3 | InputScheduler + playback + physics correction | Easy level replays to 100% several times in a row |
+| M4 | Precise checkpoints | Load test from §5 passes |
+| M5 | Practice-mode recording (cut-back + re-press) | Practice-recorded macro replays in normal mode |
+| M6 | GDR2 save/load + pause-menu UI | Round-trip works; a `.gdr2` from another bot plays back |
+| M7 | Safe mode + settings | Playback completion doesn't save progress; setting turns it off |
+| M8 | Seek / macro start positions | Start from a snapshot, play the macro the rest of the way, beat the level |
+| M9 | Dynamic hook-in point | Scheduler takes "delay this user input to tick X" |
+
+---
+
+## 10. Dynamic preview (not built now)
+
+- `leniency = N` frames. A user press at tick `f` is matched to the next unused macro press `p` with
+  `p − N ≤ f ≤ p`. On a match the click is held and fired at `p`; otherwise it goes through unchanged.
+- Releases get the same treatment (or their own leniency setting).
+- Real windows (e.g. 5136–5138) can later be saved per input in the replay extension.
+- The cursor of used inputs resets on reset and moves back when a checkpoint or seek snapshot is loaded.

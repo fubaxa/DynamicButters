@@ -1,0 +1,11 @@
+{
+	"geode": "6.0.0-alpha.1",
+	"gd": {
+		"win": "2.2091"
+	},
+	"id": "fubaxa.dynamicbutter",
+	"name": "DynamicButter",
+	"version": "v0.1.0",
+	"developer": "fubaxa",
+	"description": "Frame-accurate macros and the Dynamic click-window trainer."
+}
