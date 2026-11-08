@@ -8,6 +8,7 @@
 #include "macro/MacroManager.hpp"
 #include "debug/CheckpointTester.hpp"
 #include "debug/SpeedProbe.hpp"
+#include "debug/PhysicsTrace.hpp"
 #include "physics/PreciseCheckpoints.hpp"
 #include "physics/PlayerState.hpp"
 #include "safety/SafeMode.hpp"
@@ -124,12 +125,14 @@ class $modify(DBPlayLayer, PlayLayer) {
 		db::speedprobe::onAttemptStart(this, now);
 		applySafeMode();
 		db::cptest::onAttemptStart(this, now);
+		db::trace::onAttemptStart(this, now, m_isPracticeMode);
 	}
 
 	void levelComplete() {
 		if (db::scan::onLevelComplete()) return; // a scan trial reached the end: passed
 		unsigned tick = m_gameState.m_currentProgress;
 		m_fields->endTick = tick;
+		db::trace::onLevelComplete(tick);
 		db::MacroManager::get().onLevelComplete(this, tick);
 		db::cptest::logSummary("level complete");
 		db::seek::abort("the level ended before the start position");
@@ -170,6 +173,7 @@ class $modify(DBPlayLayer, PlayLayer) {
 		if (db::scan::onPlayerDied(this, object)) return; // a scan trial failed; no GD death
 		applySafeMode();
 		PlayLayer::destroyPlayer(player, object);
+		db::trace::onDestroyPlayer(this, player, object);
 		if (player && player->m_isDead) db::seek::onPlayerDied();
 	}
 
@@ -190,6 +194,7 @@ class $modify(DBPlayLayer, PlayLayer) {
 		db::cptest::logSummary("left the level");
 		db::seek::abort("left the level");
 		db::scan::abort("left the level");
+		db::trace::onQuit();
 		PlayLayer::onQuit();
 	}
 

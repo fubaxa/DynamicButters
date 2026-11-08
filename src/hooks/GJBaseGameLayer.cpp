@@ -8,6 +8,7 @@
 #include "macro/MacroManager.hpp"
 #include "debug/CheckpointTester.hpp"
 #include "debug/SpeedProbe.hpp"
+#include "debug/PhysicsTrace.hpp"
 #include "dynamic/WindowScan.hpp"
 #include "dynamic/DynamicAssist.hpp"
 #include "physics/PlayerState.hpp"
@@ -130,6 +131,7 @@ class $modify(DBBaseGameLayer, GJBaseGameLayer) {
 		db::speedprobe::onStepEnd(pl, after);
 		db::scan::onStepEnd(pl, after);
 		db::cptest::onStepEnd(pl);
+		db::trace::onStepEnd(pl, after);
 
 		if (db::debug::probeAtTick != 0 && after >= db::debug::probeAtTick && !db::runtime::quiet) {
 			db::debug::logPlayer(
@@ -198,6 +200,8 @@ class $modify(DBBaseGameLayer, GJBaseGameLayer) {
 
 		// Record before calling the original, so the snapshot is the state the input was applied to.
 		mgr.onInput(m_gameState.m_currentProgress, down, button, !isPlayer1, p);
+		db::trace::onInput(static_cast<PlayLayer*>(static_cast<GJBaseGameLayer*>(this)),
+			m_gameState.m_currentProgress, down, button, !isPlayer1, fromMacro, p);
 
 		if (db::settings::logInputs() && !fromMacro && !db::runtime::quiet) {
 			log::info(

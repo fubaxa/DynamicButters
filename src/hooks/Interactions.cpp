@@ -2,6 +2,7 @@
 #include <Geode/modify/GJBaseGameLayer.hpp>
 
 #include "dynamic/WindowScan.hpp"
+#include "debug/PhysicsTrace.hpp"
 
 using namespace geode::prelude;
 
@@ -15,22 +16,34 @@ class $modify(DBInteractions, GJBaseGameLayer) {
 	}
 
 	void playerTouchedRing(PlayerObject* player, RingObject* object) {
-		if (isPlayLayer()) db::scan::onInteraction(db::scan::Interaction::Ring, object);
+		if (isPlayLayer()) {
+			db::scan::onInteraction(db::scan::Interaction::Ring, object);
+			db::trace::onInteraction("ring", object);
+		}
 		GJBaseGameLayer::playerTouchedRing(player, object);
 	}
 
 	void playerTouchedTrigger(PlayerObject* player, EffectGameObject* object) {
-		if (isPlayLayer()) db::scan::onInteraction(db::scan::Interaction::Trigger, object);
+		if (isPlayLayer()) {
+			db::scan::onInteraction(db::scan::Interaction::Trigger, object);
+			db::trace::onInteraction("trigger", object);
+		}
 		GJBaseGameLayer::playerTouchedTrigger(player, object);
 	}
 
 	void bumpPlayer(PlayerObject* player, EffectGameObject* object) {
-		if (isPlayLayer()) db::scan::onInteraction(db::scan::Interaction::Pad, object);
+		if (isPlayLayer()) {
+			db::scan::onInteraction(db::scan::Interaction::Pad, object);
+			db::trace::onInteraction("pad", object);
+		}
 		GJBaseGameLayer::bumpPlayer(player, object);
 	}
 
 	void pickupItem(EffectGameObject* object) {
-		if (isPlayLayer()) db::scan::onInteraction(db::scan::Interaction::Pickup, object);
+		if (isPlayLayer()) {
+			db::scan::onInteraction(db::scan::Interaction::Pickup, object);
+			db::trace::onInteraction("pickup", object);
+		}
 		GJBaseGameLayer::pickupItem(object);
 	}
 };

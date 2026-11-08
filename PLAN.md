@@ -280,6 +280,7 @@ player takes over (Dynamic, M9) or playback continues to the end (M8's "done whe
 | `log-inputs` | `true` | Debug, M1. Turn the default off before release |
 | `tick-probe` | `true` | Debug, M1. Turn the default off before release |
 | `macro-folder` | save dir `/macros` | |
+| `physics-trace` | `false` | Debug, logging only: per-step player state + inputs, interactions, deaths, completions to `<save dir>/traces/*.csv`, with the level's start settings and legacy physics flags in the header. Off during scans and seeks. Ground truth for the separate GD physics simulator (`fubaxa/cautious-tribble`) |
 
 ---
 

@@ -113,6 +113,12 @@
 			"name": "Tick probe",
 			"description": "Debug: logs once per second whether the tick counter advances exactly once per physics step."
 		},
+		"physics-trace": {
+			"type": "bool",
+			"default": false,
+			"name": "Physics trace (debug)",
+			"description": "Logging only: writes the player state at every physics step, plus inputs, orbs/pads/triggers/pickups, deaths and completions, to a CSV file per level in the mod's traces folder. The header lists the level's start settings and legacy physics options. Nothing is written during a Dynamic scan or a seek. Files are large (about 240 lines per second of play)."
+		},
 		"force-disable-cbs": {
 			"type": "bool",
 			"default": false,
