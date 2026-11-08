@@ -15,13 +15,26 @@
 using namespace geode::prelude;
 
 namespace db::trace {
+	bool enabled() {
+		return Mod::get()->getSettingValue<bool>("physics-trace");
+	}
+
 	namespace {
 		struct State {
 			std::ofstream out;
 			std::string path;
 			unsigned attempt = 0;
 			uint64_t steps = 0;
+			bool completed = false; // level complete: the end animation isn't traced
+			GameObject* lastPortal[2] = {nullptr, nullptr}; // per player, to see when a portal is used
 		} s;
+
+		bool paused();
+
+		// A trace file is open and the current attempt is a real, unfinished run.
+		bool writing() {
+			return s.out.is_open() && !s.completed && enabled() && !paused();
+		}
 
 		// Shortest text that reads back as exactly the same value.
 		std::string f(float v) { return fmt::format("{:.9g}", v); }
@@ -46,9 +59,20 @@ namespace db::trace {
 				f(r.origin.x), f(r.origin.y), f(r.size.width), f(r.size.height));
 		}
 
+		// Rotation plus the 4 corners of the object's oriented box (the hitbox rotated objects use),
+		// as GD last computed it. Read only: an empty or out-of-date box is written as empty fields.
+		std::string oriented(GameObject* obj) {
+			if (!obj) return ",,,,,,,,";
+			auto box = obj->m_orientedBox;
+			if (!box || obj->m_isOrientedBoxDirty) return fmt::format("{},,,,,,,,", f(obj->getRotation()));
+			auto const& c = box->m_corners;
+			return fmt::format("{},{},{},{},{},{},{},{},{}", f(obj->getRotation()),
+				f(c[0].x), f(c[0].y), f(c[1].x), f(c[1].y), f(c[2].x), f(c[2].y), f(c[3].x), f(c[3].y));
+		}
+
 		void writeHeader(PlayLayer* pl) {
 			auto level = pl->m_level;
-			s.out << "# DynamicButter physics trace v1\n";
+			s.out << "# DynamicButter physics trace v3\n";
 			s.out << fmt::format("# level id={} name={} gd={}\n",
 				level ? level->m_levelID.value() : 0, level ? std::string(level->m_levelName) : "?",
 				GEODE_GD_VERSION_STRING);
@@ -72,6 +96,8 @@ namespace db::trace {
 					ls->m_reverseSync, ls->m_decreaseBoostSlide, ls->m_enableImpulseFix,
 					ls->m_enablePlayerSqueeze, ls->m_allowMultiRotation, ls->m_dynamicLevelHeight,
 					ls->m_sortGroups);
+				// GD's own serialized settings: every key it knows, including ones not named above.
+				s.out << "# settings " << ls->getSaveString() << "\n";
 			} else {
 				s.out << "# start/legacy: no level settings available\n";
 			}
@@ -85,9 +111,14 @@ namespace db::trace {
 				"dashing,jumpBuffered,ringJump,onSlope,holding,dual,rectX,rectY,rectW,rectH\n";
 			s.out << "#   mode bits: 1 ship, 2 ufo, 4 ball, 8 wave, 16 robot, 32 spider, 64 swing (0 = cube)\n";
 			s.out << "# I,tick,down,button,p2key,fromMacro,x,y,yVel\n";
-			s.out << "# O,tick,kind,objectID,objX,objY,rectX,rectY,rectW,rectH\n";
-			s.out << "# D,tick,objectID,objX,objY,rectX,rectY,rectW,rectH,dead\n";
-			s.out << "# C,tick\n";
+			s.out << "# O,tick,kind,player,objectID,objX,objY,rectX,rectY,rectW,rectH,objRot,objOBB(8),playerRot,playerOBB(8)\n";
+			s.out << "#   ring = touching the orb (every step); speed portals are kind=trigger (IDs 200 201 202 203 1334)\n";
+			s.out << "#   OBB = 4 corners x,y of the oriented (rotated) hitbox, empty if GD hasn't computed it\n";
+			s.out << "# P,tick,player,objectID,objX,objY,rectX,rectY,rectW,rectH,objRot,objOBB(8),playerRot,playerOBB(8)\n";
+			s.out << "#   portal used (the player's last activated portal changed): mode, gravity, size, mirror, dual...\n";
+			s.out << "# U,tick,player,objectID,objX,objY,rectX,rectY,rectW,rectH   (orb actually used: it changed the player)\n";
+			s.out << "# D,tick,objectID,objX,objY,rectX,rectY,rectW,rectH,dead   (GD's anticheat spike is left out)\n";
+			s.out << "# C,tick   (nothing more is written until the next attempt)\n";
 		}
 
 		bool open(PlayLayer* pl) {
@@ -117,18 +148,18 @@ namespace db::trace {
 		PlayLayer* currentPlayLayer() { return PlayLayer::get(); }
 	}
 
-	bool enabled() {
-		return Mod::get()->getSettingValue<bool>("physics-trace");
-	}
-
 	void onAttemptStart(PlayLayer* pl, uint32_t tick, bool practice) {
 		if (!pl || !enabled() || paused() || !open(pl)) return;
+		s.completed = false;
+		// Whatever the players hold at the start doesn't count as a portal used in this attempt.
+		s.lastPortal[0] = pl->m_player1 ? pl->m_player1->m_lastActivatedPortal : nullptr;
+		s.lastPortal[1] = pl->m_player2 ? pl->m_player2->m_lastActivatedPortal : nullptr;
 		s.out << fmt::format("A,{},{},{}\n", ++s.attempt, tick, practice ? 1 : 0);
 		s.out.flush();
 	}
 
 	void onStepEnd(PlayLayer* pl, uint32_t tick) {
-		if (!pl || !s.out.is_open() || !enabled() || paused()) return;
+		if (!pl || !writing()) return;
 		auto p = pl->m_player1;
 		if (!p) return;
 		auto e = ExactPlayer::capture(p);
@@ -140,34 +171,54 @@ namespace db::trace {
 			e.dashing ? 1 : 0, e.jumpBuffered ? 1 : 0, e.ringJump ? 1 : 0, e.onSlope ? 1 : 0,
 			e.holding ? 1 : 0, pl->m_gameState.m_isDualMode ? 1 : 0,
 			f(r.origin.x), f(r.origin.y), f(r.size.width), f(r.size.height));
+		PlayerObject* players[2] = {pl->m_player1, pl->m_player2};
+		for (int i = 0; i < 2; ++i) {
+			auto pp = players[i];
+			if (!pp || pp->m_lastActivatedPortal == s.lastPortal[i]) continue;
+			s.lastPortal[i] = pp->m_lastActivatedPortal;
+			if (!s.lastPortal[i]) continue;
+			s.out << fmt::format("P,{},{},{},{},{},{}\n", tick, i + 1, s.lastPortal[i]->m_objectID,
+				rect(s.lastPortal[i]), oriented(s.lastPortal[i]), oriented(pp));
+		}
 		if (++s.steps % 2400 == 0) s.out.flush();
 	}
 
 	void onInput(PlayLayer* pl, uint32_t tick, bool down, int button, bool p2key, bool fromMacro, PlayerObject* p) {
-		if (!pl || !s.out.is_open() || !enabled() || paused()) return;
+		if (!pl || !writing()) return;
 		s.out << fmt::format("I,{},{},{},{},{},{},{},{}\n", tick, down ? 1 : 0, button, p2key ? 1 : 0,
 			fromMacro ? 1 : 0, p ? f(p->m_position.x) : "", p ? f(p->m_position.y) : "",
 			p ? d(p->m_yVelocity) : "");
 	}
 
-	void onInteraction(char const* kind, GameObject* obj) {
+	void onInteraction(char const* kind, PlayerObject* player, GameObject* obj) {
 		auto pl = currentPlayLayer();
-		if (!pl || !s.out.is_open() || !enabled() || paused()) return;
-		s.out << fmt::format("O,{},{},{},{}\n", pl->m_gameState.m_currentProgress, kind,
-			obj ? obj->m_objectID : 0, rect(obj));
+		if (!pl || !writing()) return;
+		if (!player) player = pl->m_player1;
+		s.out << fmt::format("O,{},{},{},{},{},{},{}\n", pl->m_gameState.m_currentProgress, kind,
+			player == pl->m_player2 ? 2 : 1, obj ? obj->m_objectID : 0, rect(obj), oriented(obj), oriented(player));
+	}
+
+	void onRingUsed(PlayerObject* player, GameObject* obj) {
+		auto pl = currentPlayLayer();
+		if (!pl || !writing()) return;
+		s.out << fmt::format("U,{},{},{},{}\n", pl->m_gameState.m_currentProgress,
+			player == pl->m_player2 ? 2 : 1, obj ? obj->m_objectID : 0, rect(obj));
 	}
 
 	void onDestroyPlayer(PlayLayer* pl, PlayerObject* player, GameObject* obj) {
-		if (!pl || !s.out.is_open() || !enabled() || paused()) return;
+		if (!pl || !writing()) return;
+		// GD calls destroyPlayer with its own anticheat spike on purpose (never a real death).
+		if (obj && obj == pl->m_anticheatSpike) return;
 		s.out << fmt::format("D,{},{},{},{}\n", pl->m_gameState.m_currentProgress,
 			obj ? obj->m_objectID : 0, rect(obj), player && player->m_isDead ? 1 : 0);
 		s.out.flush();
 	}
 
 	void onLevelComplete(uint32_t tick) {
-		if (!s.out.is_open() || !enabled() || paused()) return;
+		if (!writing()) return;
 		s.out << fmt::format("C,{}\n", tick);
 		s.out.flush();
+		s.completed = true;
 	}
 
 	void onQuit() {

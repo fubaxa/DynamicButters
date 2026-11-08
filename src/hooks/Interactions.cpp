@@ -1,6 +1,8 @@
 #include <Geode/Geode.hpp>
 #include <Geode/modify/GJBaseGameLayer.hpp>
+#include <Geode/modify/PlayerObject.hpp>
 
+#include "dynamic/ExactState.hpp"
 #include "dynamic/WindowScan.hpp"
 #include "debug/PhysicsTrace.hpp"
 
@@ -18,7 +20,7 @@ class $modify(DBInteractions, GJBaseGameLayer) {
 	void playerTouchedRing(PlayerObject* player, RingObject* object) {
 		if (isPlayLayer()) {
 			db::scan::onInteraction(db::scan::Interaction::Ring, object);
-			db::trace::onInteraction("ring", object);
+			db::trace::onInteraction("ring", player, object);
 		}
 		GJBaseGameLayer::playerTouchedRing(player, object);
 	}
@@ -26,7 +28,7 @@ class $modify(DBInteractions, GJBaseGameLayer) {
 	void playerTouchedTrigger(PlayerObject* player, EffectGameObject* object) {
 		if (isPlayLayer()) {
 			db::scan::onInteraction(db::scan::Interaction::Trigger, object);
-			db::trace::onInteraction("trigger", object);
+			db::trace::onInteraction("trigger", player, object);
 		}
 		GJBaseGameLayer::playerTouchedTrigger(player, object);
 	}
@@ -34,7 +36,7 @@ class $modify(DBInteractions, GJBaseGameLayer) {
 	void bumpPlayer(PlayerObject* player, EffectGameObject* object) {
 		if (isPlayLayer()) {
 			db::scan::onInteraction(db::scan::Interaction::Pad, object);
-			db::trace::onInteraction("pad", object);
+			db::trace::onInteraction("pad", player, object);
 		}
 		GJBaseGameLayer::bumpPlayer(player, object);
 	}
@@ -42,8 +44,22 @@ class $modify(DBInteractions, GJBaseGameLayer) {
 	void pickupItem(EffectGameObject* object) {
 		if (isPlayLayer()) {
 			db::scan::onInteraction(db::scan::Interaction::Pickup, object);
-			db::trace::onInteraction("pickup", object);
+			db::trace::onInteraction("pickup", nullptr, object);
 		}
 		GJBaseGameLayer::pickupItem(object);
+	}
+};
+
+// playerTouchedRing fires on every step the player overlaps an orb. ringJump is where the orb can
+// actually be used; it counts as used only if it changed the player's state (GD may still reject
+// it, e.g. an orb already used this press). Trace only.
+class $modify(DBRingUse, PlayerObject) {
+	void ringJump(RingObject* object, bool skipCheck) {
+		auto pl = PlayLayer::get();
+		bool mine = pl && (this == pl->m_player1 || this == pl->m_player2) && db::trace::enabled();
+		db::ExactPlayer before;
+		if (mine) before = db::ExactPlayer::capture(this);
+		PlayerObject::ringJump(object, skipCheck);
+		if (mine && !(db::ExactPlayer::capture(this) == before)) db::trace::onRingUsed(this, object);
 	}
 };
