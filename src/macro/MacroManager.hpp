@@ -12,7 +12,9 @@ class GJGameLevel;
 class GJBaseGameLayer;
 
 namespace db {
-	enum class MacroMode { Off, Record, Playback };
+	// Dynamic: the player plays; the macro's scanned click windows are used to hold too-early clicks
+	// until their window opens (dynamic/DynamicAssist.hpp). The macro never clicks by itself.
+	enum class MacroMode { Off, Record, Playback, Dynamic };
 
 	// Owns the current macro and the record/playback state machine.
 	// Hooks call into this; it only touches GD to read player state and, in playback,
@@ -26,6 +28,7 @@ namespace db {
 		bool isRecording() const { return m_mode == MacroMode::Record && !m_seeking; }
 		bool isPlaying() const { return m_play.has_value() && (m_mode == MacroMode::Playback || m_seeking); }
 		bool isSeeking() const { return m_seeking; }
+		bool isDynamic() const { return m_mode == MacroMode::Dynamic && m_play.has_value() && !m_seeking; }
 		Macro const& macro() const { return m_macro; }
 
 		// --- pause-menu popup ---

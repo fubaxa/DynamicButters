@@ -69,6 +69,11 @@ namespace db::scan {
 			std::vector<Event> runEvents;
 			size_t eventOffset = 0;         // reference events before the checkpoint
 			bool eventsDiverged = false;
+			// Interactions of the Verify replay from the current checkpoint: the baseline trials are
+			// compared with. A respawn can legitimately change a couple of them (an orb or pad the
+			// checkpoint sits on is touched again, one fewer trigger), so the unbroken survey run
+			// isn't the right baseline for events; for the player state it is.
+			std::vector<Event> jobEvents;
 			bool verifyFailed = false;
 			uint32_t verifyMismatchTick = 0;
 			std::string verifyMismatch;
@@ -540,11 +545,11 @@ namespace db::scan {
 				return;
 			}
 			if (s.phase != Phase::Verify && s.phase != Phase::Trial) return;
-			size_t i = s.eventOffset + s.runEvents.size();
+			size_t i = s.runEvents.size();
 			s.runEvents.push_back(e);
-			if (s.eventsDiverged) return;
-			if (i >= s.refEvents.size()) { s.eventsDiverged = true; return; }
-			auto const& r = s.refEvents[i];
+			if (s.phase == Phase::Verify || s.eventsDiverged) return;
+			if (i >= s.jobEvents.size()) { s.eventsDiverged = true; return; }
+			auto const& r = s.jobEvents[i];
 			bool same = r.kind == e.kind && r.object == e.object;
 			// Orbs, pads and pickups change the level the same way whenever they're used; touch
 			// triggers start things (moves, spawns) whose timing matters, so their tick must match.
@@ -716,19 +721,14 @@ namespace db::scan {
 						s.verifyFailed = true;
 						s.verifyMismatchTick = tick;
 						s.verifyMismatch = now.diff(s.ref[*i]);
-					} else if (s.eventsDiverged) {
-						s.verifyFailed = true;
-						s.verifyMismatchTick = tick;
-						s.verifyMismatch = "different orb/pad/trigger/pickup";
 					}
 				}
 				if (tick >= end) {
 					s.runDone = true;
 					size_t expected = refEventsUpTo(end) - s.eventOffset;
 					if (!s.verifyFailed && s.runEvents.size() != expected) {
-						s.verifyFailed = true;
-						s.verifyMismatchTick = tick;
-						s.verifyMismatch = fmt::format("{} interactions instead of {}", s.runEvents.size(), expected);
+						log::info("dynamic: checkpoint at tick {}: replay has {} interactions, the unbroken run {}; trials use the replay's",
+							s.checkpointTick, s.runEvents.size(), expected);
 					}
 				}
 				return;
@@ -744,8 +744,10 @@ namespace db::scan {
 					return;
 				}
 				if (tick < std::max(s.trialFrame, s.base[s.idx].frame)) return; // moved input not applied yet
+				size_t jobEventsSoFar = std::upper_bound(s.jobEvents.begin(), s.jobEvents.end(), tick,
+					[](uint32_t t, Event const& e) { return t < e.tick; }) - s.jobEvents.begin();
 				bool eq = !s.eventsDiverged && ExactState::capture(pl) == s.ref[*i]
-					&& s.runEvents.size() == refEventsUpTo(tick) - s.eventOffset;
+					&& s.runEvents.size() == jobEventsSoFar;
 				if (!eq) {
 					s.equalRun = 0;
 					return;
@@ -797,6 +799,7 @@ namespace db::scan {
 						}
 						finishJob(pl);
 					} else {
+						s.jobEvents = s.runEvents; // baseline for this group's trials
 						s.jobInput = 0;
 						startInput(pl);
 					}

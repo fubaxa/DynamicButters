@@ -21,6 +21,18 @@
 			"name": "Dynamic",
 			"description": "The Dynamic trainer: the window scan (and later the click assist). Turn off to use DynamicButter purely as a macro bot: the Dynamic button disappears and nothing Dynamic runs."
 		},
+		"dynamic-leniency": {
+			"type": "int",
+			"default": 3,
+			"min": 1,
+			"max": 20,
+			"control": {
+				"arrow-step": 1,
+				"slider": false
+			},
+			"name": "Dynamic leniency",
+			"description": "How many physics steps (1/240 s each) before a click's window Dynamic still accepts it: such a click is held and happens on the first step of the window. Earlier clicks, late clicks and clicks without a scanned window go through unchanged."
+		},
 		"dynamic-scan-range": {
 			"type": "int",
 			"default": 20,
@@ -42,9 +54,9 @@
 		"macro-mode": {
 			"type": "string",
 			"default": "Off",
-			"one-of": ["Off", "Record", "Playback"],
+			"one-of": ["Off", "Record", "Playback", "Dynamic"],
 			"name": "Macro mode",
-			"description": "Also set from the DB button in the pause menu. Record: records your inputs and saves a .gdr2 file to the mod's macros folder when you complete the level. Playback: replays the macro picked in the DB popup, or the newest one recorded on this level, and ignores your own clicks. Takes effect at the start of the next attempt (restart after changing it)."
+			"description": "Also set from the DB button in the pause menu. Record: records your inputs and saves a .gdr2 file to the mod's macros folder when you complete the level. Playback: replays the macro picked in the DB popup, or the newest one recorded on this level, and ignores your own clicks. Dynamic: you play, and a click up to 'Dynamic leniency' steps before its window (from the window scan) is held until the window opens. Takes effect at the start of the next attempt (restart after changing it)."
 		},
 		"speedhack-enabled": {
 			"type": "bool",

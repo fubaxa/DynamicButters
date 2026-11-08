@@ -24,6 +24,7 @@ namespace db::ui {
 			switch (m) {
 				case MacroMode::Record: return "Record";
 				case MacroMode::Playback: return "Playback";
+				case MacroMode::Dynamic: return "Dynamic";
 				default: return "Off";
 			}
 		}
@@ -489,7 +490,8 @@ namespace db::ui {
 		}
 
 	protected:
-		ButtonSprite* m_modeSprites[3] = {};
+		ButtonSprite* m_modeSprites[4] = {};
+		int m_modeCount = 3;
 		CCLabelBMFont* m_status = nullptr;
 		CCMenuItemSpriteExtra* m_autoBtn = nullptr;
 		std::vector<CCNode*> m_bottomRow;
@@ -539,10 +541,12 @@ namespace db::ui {
 			auto modeLabel = label("Mode", "goldFont.fnt", 0.6f);
 			m_mainLayer->addChild(modeLabel);
 			std::vector<CCNode*> modeRow{modeLabel};
-			MacroMode modes[3] = {MacroMode::Off, MacroMode::Record, MacroMode::Playback};
-			for (int i = 0; i < 3; ++i) {
+			// The Dynamic mode only exists while the Dynamic setting is on.
+			MacroMode modes[4] = {MacroMode::Off, MacroMode::Record, MacroMode::Playback, MacroMode::Dynamic};
+			m_modeCount = scan::enabled() ? 4 : 3;
+			for (int i = 0; i < m_modeCount; ++i) {
 				auto mode = modes[i];
-				auto spr = ButtonSprite::create(modeText(mode), "bigFont.fnt", "GJ_button_04.png", 0.6f);
+				auto spr = ButtonSprite::create(modeText(mode), "bigFont.fnt", "GJ_button_04.png", m_modeCount == 4 ? 0.5f : 0.6f);
 				m_modeSprites[i] = spr;
 				auto btn = CCMenuItemExt::createSpriteExtra(spr, [this, mode](CCMenuItemSpriteExtra*) {
 					MacroManager::get().setPendingMode(mode);
@@ -556,7 +560,7 @@ namespace db::ui {
 			// Dynamic (hidden when the Dynamic setting is off: macro-only use)
 			if (scan::enabled()) {
 				auto dynBtn = CCMenuItemExt::createSpriteExtra(
-					ButtonSprite::create("Dynamic", "bigFont.fnt", "GJ_button_03.png", 0.45f),
+					ButtonSprite::create("Windows", "bigFont.fnt", "GJ_button_03.png", 0.45f),
 					[this](CCMenuItemSpriteExtra*) {
 						DynamicPopup::create([this] { this->onClose(nullptr); })->show();
 					});
@@ -646,8 +650,8 @@ namespace db::ui {
 		void refresh() {
 			auto& mgr = MacroManager::get();
 			auto pending = mgr.pendingMode();
-			MacroMode modes[3] = {MacroMode::Off, MacroMode::Record, MacroMode::Playback};
-			for (int i = 0; i < 3; ++i) {
+			MacroMode modes[4] = {MacroMode::Off, MacroMode::Record, MacroMode::Playback, MacroMode::Dynamic};
+			for (int i = 0; i < m_modeCount; ++i) {
 				m_modeSprites[i]->updateBGImage(modes[i] == pending ? "GJ_button_01.png" : "GJ_button_04.png");
 			}
 			m_autoBtn->setVisible(!mgr.selectedPath().empty());
@@ -665,6 +669,18 @@ namespace db::ui {
 						play->botName.empty() ? "unknown bot" : play->botName);
 				} else {
 					text += "Playing: nothing (no macro found for this level)\n";
+				}
+			} else if (mgr.mode() == MacroMode::Dynamic) {
+				if (auto const& play = mgr.playMacro()) {
+					size_t windows = std::count_if(play->inputs.begin(), play->inputs.end(), [](MacroInput const& in) {
+						return in.window.scanned && !(in.window.flags & (InputWindow::BaselineFailed | InputWindow::ShipSkipped));
+					});
+					text += fmt::format("Dynamic: {} ({} of {} inputs have a window, leniency {} steps)\n",
+						mgr.playSource(), windows, play->inputs.size(),
+						Mod::get()->getSettingValue<int64_t>("dynamic-leniency"));
+					if (windows == 0) text += "Scan this macro's windows first (Windows button)\n";
+				} else {
+					text += "Dynamic: no macro found for this level\n";
 				}
 			}
 			if (!mgr.selectedPath().empty()) {

@@ -19,6 +19,7 @@ namespace db {
 			switch (m) {
 				case MacroMode::Record: return "Record";
 				case MacroMode::Playback: return "Playback";
+				case MacroMode::Dynamic: return "Dynamic";
 				default: return "Off";
 			}
 		}
@@ -42,6 +43,7 @@ namespace db {
 		MacroMode modeFromString(std::string const& value) {
 			return value == "Record" ? MacroMode::Record
 				: value == "Playback" ? MacroMode::Playback
+				: value == "Dynamic" ? MacroMode::Dynamic
 				: MacroMode::Off;
 		}
 	}
@@ -75,7 +77,7 @@ namespace db {
 		m_play.reset();
 		m_playSource.clear();
 		m_playPath.clear();
-		if (m_mode == MacroMode::Playback || m_seeking) loadPlayback();
+		if (m_mode == MacroMode::Playback || m_mode == MacroMode::Dynamic || m_seeking) loadPlayback();
 	}
 
 	void MacroManager::loadPlayback() {

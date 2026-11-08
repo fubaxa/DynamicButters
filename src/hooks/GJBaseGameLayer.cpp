@@ -9,6 +9,7 @@
 #include "debug/CheckpointTester.hpp"
 #include "debug/SpeedProbe.hpp"
 #include "dynamic/WindowScan.hpp"
+#include "dynamic/DynamicAssist.hpp"
 #include "physics/PlayerState.hpp"
 #include "physics/PreciseCheckpoints.hpp"
 
@@ -71,6 +72,7 @@ class $modify(DBBaseGameLayer, GJBaseGameLayer) {
 		GJBaseGameLayer::processQueuedButtons(dt, clearInputQueue);
 		if (isPlayLayer()) {
 			db::MacroManager::get().dispatchDue(this, m_gameState.m_currentProgress, false);
+			db::dynamic::dispatchDue(this, m_gameState.m_currentProgress);
 		}
 	}
 
@@ -169,6 +171,16 @@ class $modify(DBBaseGameLayer, GJBaseGameLayer) {
 
 		auto& mgr = db::MacroManager::get();
 		bool fromMacro = mgr.isDispatching();
+
+		// Dynamic: a too-early player click is held until its window opens (DynamicAssist.hpp).
+		if (!fromMacro && !db::dynamic::isDispatching()
+			&& db::dynamic::onPlayerInput(this, down, button, isPlayer1, m_gameState.m_currentProgress)) {
+			if (db::settings::logInputs() && !db::runtime::quiet) {
+				log::info("input: {} key={} tick={} held by Dynamic", down ? "press" : "release",
+					isPlayer1 ? "P1" : "P2", m_gameState.m_currentProgress);
+			}
+			return;
+		}
 
 		// During playback only the macro plays: drop the player's own inputs.
 		if (!fromMacro && mgr.shouldBlockExternalInput(down, !isPlayer1)) {

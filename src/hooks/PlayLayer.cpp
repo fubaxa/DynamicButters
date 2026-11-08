@@ -14,6 +14,7 @@
 #include "macro/Seek.hpp"
 #include "macro/SmartStartPos.hpp"
 #include "dynamic/WindowScan.hpp"
+#include "dynamic/DynamicAssist.hpp"
 
 using namespace geode::prelude;
 
@@ -90,7 +91,8 @@ class $modify(DBPlayLayer, PlayLayer) {
 			return;
 		}
 		auto& mgr = db::MacroManager::get();
-		char const* mode = mgr.isRecording() ? "  REC" : mgr.isPlaying() ? "  PLAY" : "";
+		std::string mode = mgr.isRecording() ? "  REC" : mgr.isPlaying() ? "  PLAY" : "";
+		if (auto dyn = db::dynamic::status(); !dyn.empty()) mode = "  " + dyn;
 		if (auto end = m_fields->endTick) {
 			label->setString(fmt::format("tick {} (end){}", *end, mode).c_str());
 		} else {
@@ -117,6 +119,7 @@ class $modify(DBPlayLayer, PlayLayer) {
 			db::debug::probeAtTick = now + db::debug::PROBE_DELAY;
 		}
 		db::MacroManager::get().onAttemptStart(this, now, m_isPracticeMode);
+		db::dynamic::onAttemptStart(this, now);
 		db::safe::onAttemptStart(now);
 		db::speedprobe::onAttemptStart(this, now);
 		applySafeMode();

@@ -40,6 +40,10 @@ namespace db::safe {
 			markUnsafe("playback");
 			return;
 		}
+		if (MacroManager::get().isDynamic()) {
+			markUnsafe("Dynamic");
+			return;
+		}
 		float speed = speedhackFactor();
 		if (std::abs(speed - 1.f) > 1e-4f) markUnsafe(fmt::format("speedhack {:.2f}x", speed));
 	}
