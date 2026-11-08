@@ -92,7 +92,7 @@ namespace db::trace {
 
 		bool open(PlayLayer* pl) {
 			if (s.out.is_open()) return true;
-			auto dir = Mod::get()->getSaveDir() / "traces";
+			auto dir = std::filesystem::u8path((Mod::get()->getSaveDir() / "traces").string());
 			std::error_code ec;
 			std::filesystem::create_directories(dir, ec);
 			auto level = pl->m_level;
