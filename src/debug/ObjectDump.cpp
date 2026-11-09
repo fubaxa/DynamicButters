@@ -35,6 +35,18 @@ namespace {
 		return skip;
 	}
 
+	// Some objects' setup reads the current level (seen: object 1329 crashed in
+	// EffectGameObject::customSetup reading a null pointer at the main menu). Those are caught here
+	// and written as failed instead of crashing the game. No C++ objects may live in this function.
+	bool safeSetup(GameObject* obj) {
+		__try {
+			obj->customSetup();
+			return true;
+		} __except (1 /* EXCEPTION_EXECUTE_HANDLER */) {
+			return false;
+		}
+	}
+
 	void dump() {
 		auto toolbox = ObjectToolbox::sharedState();
 		if (!toolbox) return;
@@ -44,10 +56,10 @@ namespace {
 			log::warn("objdump: could not open objects.csv");
 			return;
 		}
-		out << "# DynamicButter object dump v1, gd=" << GEODE_GD_VERSION_STRING << "\n";
+		out << "# DynamicButter object dump v2, gd=" << GEODE_GD_VERSION_STRING << "\n";
 		out << "# rect = hitbox at scale 1, rotation 0; rectDX/DY = hitbox centre minus object position\n";
 		out << "id,frame,type,rectW,rectH,rectDX,rectDY,radius,width,height,trigger,decoration,decoration2,"
-			"passable,noTouch,invisible,slope,extendedCollision,skipped\n";
+			"passable,noTouch,invisible,slope,extendedCollision,skipped,spriteW,spriteH\n";
 		int count = 0, failed = 0;
 		for (auto const& [id, frame] : toolbox->m_allKeys) {
 			if (skip.contains(id)) {
@@ -66,14 +78,23 @@ namespace {
 			}
 			obj->setStartPos({PROBE_X, PROBE_Y});
 			obj->setPosition({PROBE_X, PROBE_Y});
+			// createWithKey alone leaves every object as type 0 with its sprite size as hitbox (seen
+			// in dump v1); customSetup is where GD sets the type and the real hitbox per object ID.
+			auto spriteSize = obj->getObjectRect().size;
+			if (!safeSetup(obj)) {
+				out << id << "," << frame << ",,,,,,,,,,,,,,,,,2\n";
+				failed++;
+				continue;
+			}
 			obj->setObjectRectDirty(true);
 			auto const& r = obj->getObjectRect();
-			out << fmt::format("{},{},{},{:.9g},{:.9g},{:.9g},{:.9g},{:.9g},{:.9g},{:.9g},{},{},{},{},{},{},{},{},0\n",
+			out << fmt::format("{},{},{},{:.9g},{:.9g},{:.9g},{:.9g},{:.9g},{:.9g},{:.9g},{},{},{},{},{},{},{},{},0,{:.9g},{:.9g}\n",
 				id, frame, static_cast<int>(obj->m_objectType), r.size.width, r.size.height,
 				r.getMidX() - PROBE_X, r.getMidY() - PROBE_Y, obj->m_objectRadius, obj->m_width,
 				obj->m_height, obj->m_isTrigger ? 1 : 0, obj->m_isDecoration ? 1 : 0,
 				obj->m_isDecoration2 ? 1 : 0, obj->m_isPassable ? 1 : 0, obj->m_isNoTouch ? 1 : 0,
-				obj->m_isInvisible ? 1 : 0, obj->m_slopeDirection, obj->m_hasExtendedCollision ? 1 : 0);
+				obj->m_isInvisible ? 1 : 0, obj->m_slopeDirection, obj->m_hasExtendedCollision ? 1 : 0,
+				spriteSize.width, spriteSize.height);
 			count++;
 		}
 		out.close();
