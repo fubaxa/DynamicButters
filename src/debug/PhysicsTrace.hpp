@@ -18,7 +18,7 @@ class GameObject;
 //   # ...                                  comments / header (level, start settings, legacy flags)
 //   A,attempt,tick,practice                attempt start (also after every practice respawn)
 //   S,tick,step,x,y,xVel,yVel,rot,...      end of a physics step (columns listed in the header);
-//                                          posX,posY = per-step position (x,y = sprite, per frame)
+//                                          posX,posY = hitbox centre, per step (x,y = sprite, per frame)
 //   I,tick,down,button,p2key,macro,x,y,yVel  input applied by GD (state right before it)
 //   O,tick,kind,player,objectID,ox,oy,rx,ry,rw,rh,objRot,objOBB(8),playerRot,playerOBB(8)
 //                                          interaction: orb / pad / trigger / pickup + its hitbox
@@ -30,7 +30,7 @@ class GameObject;
 //   D,tick,objectID,ox,oy,rx,ry,rw,rh,dead   destroyPlayer (dead = the player actually died);
 //                                          GD's own anticheat-spike calls are left out
 //   C,tick                                 level complete; nothing more until the next attempt
-// O/U/D/C raised inside a physics step are held and written at its end, with its tick.
+// O/U/D/C are held and written right before the S row of the step they belong to, with its tick.
 // Floats are written with 9 significant digits and doubles with 17, so values round-trip exactly.
 namespace db::trace {
 	bool enabled();

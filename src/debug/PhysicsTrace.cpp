@@ -28,8 +28,10 @@ namespace db::trace {
 			uint64_t steps = 0;
 			bool completed = false; // level complete: the end animation isn't traced
 			GameObject* lastPortal[2] = {nullptr, nullptr}; // per player, to see when a portal is used
-			// O/U/D records raised during a physics step: GD's tick only advances partway through the
-			// step, so they're held and written at the step's end with that step's tick.
+			// O/U/D/C records are held and written at the end of the next physics step, with its tick.
+			// Orb/pad/trigger touches happen outside processCommands, after the player has moved but
+			// before the tick advances (measured: the touch overlaps the next S row's hitbox, not the
+			// current one); deaths happen inside it. Either way they belong to the next S row.
 			std::vector<std::pair<char, std::string>> pending;
 		} s;
 
@@ -76,7 +78,7 @@ namespace db::trace {
 
 		void writeHeader(PlayLayer* pl) {
 			auto level = pl->m_level;
-			s.out << "# DynamicButter physics trace v4\n";
+			s.out << "# DynamicButter physics trace v5\n";
 			s.out << fmt::format("# level id={} name={} gd={}\n",
 				level ? level->m_levelID.value() : 0, level ? std::string(level->m_levelName) : "?",
 				GEODE_GD_VERSION_STRING);
@@ -114,8 +116,8 @@ namespace db::trace {
 			s.out << "# S,tick,stepInFrame,x,y,xVel,yVel,rotation,size,speed,onGround,upsideDown,mode,"
 				"dashing,jumpBuffered,ringJump,onSlope,holding,dual,rectX,rectY,rectW,rectH,posX,posY\n";
 			s.out << "#   x,y = sprite position (GD updates it once per rendered frame: stale on the 2nd+ step\n";
-			s.out << "#   of a frame); posX,posY = GD's per-step physics position (use these)\n";
-			s.out << "#   O/U/D/C raised during a step carry that step's tick (same as its S row)\n";
+			s.out << "#   of a frame); posX,posY = hitbox centre, correct on every step (use these)\n";
+			s.out << "#   O/U/D/C rows are written right before the S row of the step they belong to, with its tick\n";
 			s.out << "#   mode bits: 1 ship, 2 ufo, 4 ball, 8 wave, 16 robot, 32 spider, 64 swing (0 = cube)\n";
 			s.out << "# I,tick,down,button,p2key,fromMacro,posX,posY,yVel   (per-step position, right before the input)\n";
 			s.out << "# O,tick,kind,player,objectID,objX,objY,rectX,rectY,rectW,rectH,objRot,objOBB(8),playerRot,playerOBB(8)\n";
@@ -154,15 +156,17 @@ namespace db::trace {
 
 		PlayLayer* currentPlayLayer() { return PlayLayer::get(); }
 
-		// Writes an event now, or holds it until the end of the physics step it happened in.
-		void event(PlayLayer* pl, char type, std::string rest) {
-			if (runtime::inStep) {
-				s.pending.emplace_back(type, std::move(rest));
-				return;
-			}
-			s.out << type << ',' << pl->m_gameState.m_currentProgress;
-			if (!rest.empty()) s.out << ',' << rest;
-			s.out << '\n';
+		// Holds an event until the end of the physics step it belongs to.
+		void event(char type, std::string rest) {
+			s.pending.emplace_back(type, std::move(rest));
+		}
+
+		// The player's position on this physics step: the centre of its hitbox. (m_position is the
+		// sprite position, updated once per rendered frame; m_positionX/Y don't follow the player.)
+		std::string pos(PlayerObject* p) {
+			if (!p) return ",";
+			auto const& r = p->getObjectRect();
+			return fmt::format("{},{}", f(r.getMidX()), f(r.getMidY()));
 		}
 	}
 
@@ -199,13 +203,12 @@ namespace db::trace {
 		auto e = ExactPlayer::capture(p);
 		auto const& b = e.basic;
 		auto const& r = p->getObjectRect();
-		s.out << fmt::format("S,{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
+		s.out << fmt::format("S,{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
 			tick, runtime::stepInFrame, f(b.x), f(b.y), d(b.xVel), d(b.yVel), f(b.rotation),
 			f(b.vehicleSize), f(b.playerSpeed), b.onGround ? 1 : 0, b.upsideDown ? 1 : 0, b.gamemode,
 			e.dashing ? 1 : 0, e.jumpBuffered ? 1 : 0, e.ringJump ? 1 : 0, e.onSlope ? 1 : 0,
 			e.holding ? 1 : 0, pl->m_gameState.m_isDualMode ? 1 : 0,
-			f(r.origin.x), f(r.origin.y), f(r.size.width), f(r.size.height),
-			d(p->m_positionX), d(p->m_positionY));
+			f(r.origin.x), f(r.origin.y), f(r.size.width), f(r.size.height), pos(p));
 		PlayerObject* players[2] = {pl->m_player1, pl->m_player2};
 		for (int i = 0; i < 2; ++i) {
 			auto pp = players[i];
@@ -220,8 +223,8 @@ namespace db::trace {
 
 	void onInput(PlayLayer* pl, uint32_t tick, bool down, int button, bool p2key, bool fromMacro, PlayerObject* p) {
 		if (!pl || !writing()) return;
-		s.out << fmt::format("I,{},{},{},{},{},{},{},{}\n", tick, down ? 1 : 0, button, p2key ? 1 : 0,
-			fromMacro ? 1 : 0, p ? d(p->m_positionX) : "", p ? d(p->m_positionY) : "",
+		s.out << fmt::format("I,{},{},{},{},{},{},{}\n", tick, down ? 1 : 0, button, p2key ? 1 : 0,
+			fromMacro ? 1 : 0, pos(p),
 			p ? d(p->m_yVelocity) : "");
 	}
 
@@ -229,14 +232,14 @@ namespace db::trace {
 		auto pl = currentPlayLayer();
 		if (!pl || !writing()) return;
 		if (!player) player = pl->m_player1;
-		event(pl, 'O', fmt::format("{},{},{},{},{},{}", kind, player == pl->m_player2 ? 2 : 1,
+		event('O', fmt::format("{},{},{},{},{},{}", kind, player == pl->m_player2 ? 2 : 1,
 			obj ? obj->m_objectID : 0, rect(obj), oriented(obj), oriented(player)));
 	}
 
 	void onRingUsed(PlayerObject* player, GameObject* obj) {
 		auto pl = currentPlayLayer();
 		if (!pl || !writing()) return;
-		event(pl, 'U', fmt::format("{},{},{}", player == pl->m_player2 ? 2 : 1,
+		event('U', fmt::format("{},{},{}", player == pl->m_player2 ? 2 : 1,
 			obj ? obj->m_objectID : 0, rect(obj)));
 	}
 
@@ -244,20 +247,13 @@ namespace db::trace {
 		if (!pl || !writing()) return;
 		// GD calls destroyPlayer with its own anticheat spike on purpose (never a real death).
 		if (obj && obj == pl->m_anticheatSpike) return;
-		event(pl, 'D', fmt::format("{},{},{}", obj ? obj->m_objectID : 0, rect(obj),
+		event('D', fmt::format("{},{},{}", obj ? obj->m_objectID : 0, rect(obj),
 			player && player->m_isDead ? 1 : 0));
-		if (!runtime::inStep) s.out.flush();
 	}
 
 	void onLevelComplete(uint32_t tick) {
 		if (!writing()) return;
-		if (runtime::inStep) {
-			s.pending.emplace_back('C', std::string()); // written with the step's tick at its end
-			return;
-		}
-		s.out << fmt::format("C,{}\n", tick);
-		s.out.flush();
-		s.completed = true;
+		event('C', std::string()); // written with its step's tick; the trace stops after that step
 	}
 
 	void onQuit() {

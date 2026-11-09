@@ -513,12 +513,13 @@ legitimately change a couple of interactions). (c) is open.
 - **Checkpoint test keeps running after the level is complete** (debug tool only, not fixed on purpose).
 - **`PlayerState` reads the sprite position, which is stale on lag frames (not fixed, found 2026-11-08).**
   `PlayerObject::m_position` is only updated once per rendered frame; on the 2nd+ physics step of a
-  frame it still holds the previous value, while `GameObject::m_positionX/Y` and the hitbox rect move
-  every step (seen in the physics trace: x=336.56 for 3 steps of one 3-step frame, then a jump of 3
-  steps' worth). Checkpoints, the Dynamic scan and playback correction all use `PlayerState`, so on a
-  multi-step frame they may compare or restore a one-frame-old x/y. Rare at 240 FPS (9 of 25,280 steps
-  in one run). The physics trace logs `m_positionX/Y` as `posX,posY`. Switching `PlayerState` would
-  change mod behaviour, so it needs its own test pass.
+  frame it still holds the previous value, while the hitbox rect (`getObjectRect()`) moves every step
+  (seen in the physics trace: x=336.56 for 3 steps of one 3-step frame, then a jump of 3 steps'
+  worth). `GameObject::m_positionX/Y` is not an alternative: it stayed at 0/105 for a whole run.
+  Checkpoints, the Dynamic scan and playback correction all use `PlayerState`, so on a multi-step
+  frame they may compare or restore a one-frame-old x/y. Rare at 240 FPS (9 of 25,280 steps in one
+  run). The physics trace logs the hitbox centre as `posX,posY`. Switching `PlayerState` would change
+  mod behaviour, so it needs its own test pass.
 - **Practice recordings made before the M6 checkpoint fix are wrong after their first respawn.**
   The precise-checkpoint restore put the player one physics step behind where GD respawns them
   (ship level "ship": dx=1.95 from checkpoint tick 1664; playback with correction off drifted from
