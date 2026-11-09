@@ -119,6 +119,12 @@
 			"name": "Physics trace (debug)",
 			"description": "Logging only: writes the player state at every physics step, plus inputs, orbs/pads/triggers/pickups, deaths and completions, to a CSV file per level in the mod's traces folder. The header lists the level's start settings and legacy physics options. Nothing is written during a Dynamic scan or a seek. Files are large (about 240 lines per second of play)."
 		},
+		"object-dump": {
+			"type": "bool",
+			"default": false,
+			"name": "Object dump (debug)",
+			"description": "Logging only: when the main menu first opens after starting the game, writes the type and hitbox of every object ID to objects.csv in the mod's save folder. Turn it off again afterwards."
+		},
 		"force-disable-cbs": {
 			"type": "bool",
 			"default": false,
