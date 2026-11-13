@@ -18,6 +18,9 @@ namespace db::settings {
 	inline bool physicsCorrection() {
 		return geode::Mod::get()->getSettingValue<bool>("physics-correction");
 	}
+	inline bool startPosCorrection() {
+		return geode::Mod::get()->getSettingValue<bool>("startpos-correction");
+	}
 	inline bool forceDisableCbs() {
 		return geode::Mod::get()->getSettingValue<bool>("force-disable-cbs");
 	}

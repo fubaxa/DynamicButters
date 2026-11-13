@@ -351,7 +351,7 @@ namespace db {
 		if (!isPlaying() || !gl) return;
 		auto const& inputs = m_play->inputs;
 		bool twoPlayer = gl->m_levelSettings && gl->m_levelSettings->m_twoPlayerMode;
-		bool correct = settings::physicsCorrection() && !m_quiet;
+		bool correct = (settings::physicsCorrection() || (m_startPosAttempt && settings::startPosCorrection())) && !m_quiet;
 		bool logEach = settings::logInputs() && !m_quiet;
 
 		// Start position where the macro is mid-hold: press first.
@@ -475,7 +475,9 @@ namespace db {
 					}
 				}
 				auto runX = path::xAt(pathPts, best);
-				m_tickOffset = int64_t(best) - int64_t(tick);
+				// The first step after a spawn doesn't move the player, so the run's tick `best`
+				// lines up with the game's tick + 2 (the step after that frozen step).
+				m_tickOffset = int64_t(best) - int64_t(tick) - 2;
 				log::info("startpos: recorded run passed x={:.3f} at tick {:.2f}; using step tick {} ({:.2f} s), offset {}",
 					x, *exact, best, best / 480.0, m_tickOffset);
 				if (runX && p) {
@@ -502,7 +504,7 @@ namespace db {
 			m_tickOffset = int64_t(m_play->lastInputFrame()) + 2 - int64_t(tick);
 			return;
 		}
-		m_tickOffset = int64_t(*macroTick) - int64_t(tick);
+		m_tickOffset = int64_t(*macroTick) - int64_t(tick) - 2;   // frozen first step, as above
 		log::info("startpos: estimated macro tick {} ({:.2f} s) at the spawn, offset {}", *macroTick, *macroTick / 480.0, m_tickOffset);
 	}
 

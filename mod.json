@@ -49,12 +49,17 @@
 			"type": "bool",
 			"default": true,
 			"name": "SmartStartPos",
-			"description": "Start positions take their speed, gamemode, size, gravity, dual and mirror from the last portals before them. Speed portals with preview turned off are ignored; a portal the start position is inside isn't forced (it applies itself on spawn)."
+			"description": "Start positions take their speed, gamemode, size, dual and mirror from the last portals before them, or from the level's start settings when there is no such portal (gravity portals are ignored). Speed portals with preview turned off are ignored; a portal the start position is inside counts as passed."
 		},
 		"macro-mode": {
 			"type": "string",
 			"default": "Off",
-			"one-of": ["Off", "Record", "Playback", "Dynamic"],
+			"one-of": [
+				"Off",
+				"Record",
+				"Playback",
+				"Dynamic"
+			],
 			"name": "Macro mode",
 			"description": "Also set from the DB button in the pause menu. Record: records your inputs and saves a .gdr2 file to the mod's macros folder when you complete the level. Playback: replays the macro picked in the DB popup, or the newest one recorded on this level, and ignores your own clicks. Dynamic: you play, and a click up to 'Dynamic leniency' steps before its window (from the window scan) is held until the window opens. Takes effect at the start of the next attempt (restart after changing it)."
 		},
@@ -94,6 +99,12 @@
 			"default": true,
 			"name": "Physics correction",
 			"description": "During playback, snaps the player to the recorded position, rotation and y-velocity at every input. Turn off to test pure frame-accuracy. Drift is logged either way."
+		},
+		"startpos-correction": {
+			"type": "bool",
+			"default": true,
+			"name": "Start position correction",
+			"description": "During playback from a start position, snaps the player to the recorded position, rotation and y-velocity at every input, even when Physics correction is off. A start position can't restore everything the recorded run had (such as which block the landing snap measures from), so without this small differences grow into a desync."
 		},
 		"show-tick-counter": {
 			"type": "bool",

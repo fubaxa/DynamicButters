@@ -54,21 +54,36 @@ namespace db::smartstartpos {
 		CCPoint spos = sp->getPosition();
 		Last<Speed> speed;
 		Last<int> mode;
-		Last<bool> mini, flipped, dual, mirror;
-		int skippedInside = 0, skippedNoPreview = 0;
+		Last<bool> mini, dual, mirror;
+		int inside = 0, skippedNoPreview = 0;
+
+		// Before any portal the player has the level's own start settings: they count as passed
+		// first, so a start position with no portal of some kind before it gets the level's value.
+		if (auto ls = pl->m_levelSettings) {
+			speed.offer(-1e9f, ls->m_startSpeed);
+			mode.offer(-1e9f, ls->m_startMode);
+			mini.offer(-1e9f, ls->m_startMini);
+			dual.offer(-1e9f, ls->m_startDual);
+			mirror.offer(-1e9f, ls->m_mirrorMode);
+		}
 
 		for (auto obj : CCArrayExt<GameObject*>(pl->m_objects)) {
 			if (!obj) continue;
 			int id = obj->m_objectID;
 			auto spd = speedOf(id);
 			auto md = modeOf(id);
-			bool other = id == 99 || id == 101 || id == 10 || id == 11 || id == 286 || id == 287 || id == 45 || id == 46;
+			// Gravity portals (10, 11) are left alone: the start position's own gravity setting wins.
+			bool other = id == 99 || id == 101 || id == 286 || id == 287 || id == 45 || id == 46;
 			if (!spd && !md && !other) continue;
 
 			float ox = obj->getPositionX();
-			if (ox > spos.x) continue;
-			// The start position is inside this portal: it applies itself on spawn, don't force it.
-			if (obj->getObjectRect().containsPoint(spos)) { skippedInside++; continue; }
+			// A portal the start position is inside counts as passed, even when its centre is
+			// just ahead. Leaving it to the game isn't safe: on spawn the game checks it with the
+			// start position's old gamemode hitbox, which can be too small to touch it. Forcing
+			// it is harmless when the game applies it too (it sets the same thing again).
+			bool isInside = obj->getObjectRect().containsPoint(spos);
+			if (ox > spos.x && !isInside) continue;
+			if (isInside) inside++;
 
 			if (spd) {
 				// Unused speed portals have preview turned off.
@@ -81,8 +96,6 @@ namespace db::smartstartpos {
 				mode.offer(ox, *md);
 			} else if (id == 99 || id == 101) {
 				mini.offer(ox, id == 101);
-			} else if (id == 10 || id == 11) {
-				flipped.offer(ox, id == 11);
 			} else if (id == 286 || id == 287) {
 				dual.offer(ox, id == 286);
 			} else {
@@ -97,11 +110,10 @@ namespace db::smartstartpos {
 		if (speed.value) { note("speed", int(st->m_startSpeed), int(*speed.value)); st->m_startSpeed = *speed.value; }
 		if (mode.value) { note("mode", st->m_startMode, *mode.value); st->m_startMode = *mode.value; }
 		if (mini.value) { note("mini", st->m_startMini, *mini.value); st->m_startMini = *mini.value; }
-		if (flipped.value) { note("flipped", st->m_isFlipped, *flipped.value); st->m_isFlipped = *flipped.value; }
 		if (dual.value) { note("dual", st->m_startDual, *dual.value); st->m_startDual = *dual.value; }
 		if (mirror.value) { note("mirror", st->m_mirrorMode, *mirror.value); st->m_mirrorMode = *mirror.value; }
 
-		log::info("smartstartpos: start position at x={:.2f}:{} (portals skipped: {} containing it, {} speed portals without preview)",
-			spos.x, changes.empty() ? " settings already match" : changes, skippedInside, skippedNoPreview);
+		log::info("smartstartpos: start position at x={:.2f}:{} ({} portals containing it, forced; {} speed portals without preview skipped)",
+			spos.x, changes.empty() ? " settings already match" : changes, inside, skippedNoPreview);
 	}
 }
