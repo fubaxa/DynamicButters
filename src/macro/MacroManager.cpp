@@ -387,7 +387,9 @@ namespace db {
 				double dx = std::abs(p->m_position.x - mi.phys.x);
 				double dy = std::abs(p->m_position.y - mi.phys.y);
 				double dyv = std::abs(p->m_yVelocity - mi.phys.yVel);
-				double drot = angleDiff(p->getRotation(), mi.phys.rotation);
+				// Macros made outside the game (the simulator's solver) don't know the rotation: NaN.
+				bool hasRot = !std::isnan(mi.phys.rotation);
+				double drot = hasRot ? angleDiff(p->getRotation(), mi.phys.rotation) : 0.0;
 				if (measurable) {
 					if (dx > m_stats.maxDx) { m_stats.maxDx = dx; m_stats.maxAtTick = mi.frame; }
 					m_stats.maxDy = std::max(m_stats.maxDy, dy);
@@ -404,7 +406,7 @@ namespace db {
 					cocos2d::CCPoint pos{mi.phys.x, mi.phys.y};
 					p->m_position = pos;
 					p->setPosition(pos);
-					p->setRotation(mi.phys.rotation);
+					if (hasRot) p->setRotation(mi.phys.rotation); // unknown: leave the player's own
 					p->m_yVelocity = mi.phys.yVel;
 					m_stats.corrected++;
 				}
