@@ -208,7 +208,8 @@ namespace db::ui {
 			}
 			scroll->m_contentLayer->updateLayout();
 			scroll->scrollToTop();
-			m_mainLayer->addChildAtPosition(scroll, Anchor::Center, {-LIST_W / 2.f, -LIST_H / 2.f - 8.f});
+			// Geode 6's ScrollLayer is positioned by its centre (anchor 0.5, 0.5).
+			m_mainLayer->addChildAtPosition(scroll, Anchor::Center, {0.f, -8.f});
 
 			if (entries.empty()) {
 				auto empty = label("No .gdr2 files yet. Record a level, or put\nfiles from another bot in the macros folder.",
@@ -363,7 +364,7 @@ namespace db::ui {
 			}
 			scroll->m_contentLayer->updateLayout();
 			scroll->scrollToTop();
-			scroll->setPosition({(W - LIST_W) / 2.f, 48.f});
+			scroll->setPosition({W / 2.f, 48.f + LIST_H / 2.f}); // positioned by its centre (Geode 6)
 			m_listHolder->addChild(scroll);
 
 			if (ticks.empty()) {
