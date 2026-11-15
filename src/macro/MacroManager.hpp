@@ -21,6 +21,9 @@ namespace db {
 	// to apply inputs (handleButton) and physics corrections.
 	class MacroManager {
 	public:
+		// The player a key moves: in a 2-player level in dual mode the P2 key moves player 2,
+		// otherwise both keys move player 1.
+		static PlayerObject* playerForKey(GJBaseGameLayer* gl, bool player2);
 		static MacroManager& get();
 
 		MacroMode mode() const { return m_mode; }
@@ -122,9 +125,14 @@ namespace db {
 		struct RespawnRelease {
 			bool active = false;
 			uint32_t tick = 0;
-			PhysSnapshot fallbackPhys; // respawn state, used only if GD's release never arrives
+			// respawn state per key (P1, P2), used only if GD's release never arrives; in a
+			// 2-player level the P2 key's is player 2's
+			PhysSnapshot fallbackPhys[2];
+			bool twoPlayer = false;
 		} m_respawnRelease;
-		void emitRespawnRelease(PhysSnapshot const& phys, char const* how);
+		// phys[k]: the state the release of key k is applied to
+		void emitRespawnRelease(PhysSnapshot const (&phys)[2], char const* how);
+
 		static PhysSnapshot snapshotOf(PlayerObject* player);
 
 		// last completed recording this session, so Playback works right after recording even if saving failed

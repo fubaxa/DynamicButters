@@ -217,7 +217,8 @@ namespace db {
 		if (m_held[0] || m_held[1]) {
 			m_respawnRelease.active = true;
 			m_respawnRelease.tick = tick + 2;
-			m_respawnRelease.fallbackPhys = snapshotOf(pl ? pl->m_player1 : nullptr);
+			m_respawnRelease.twoPlayer = pl && pl->m_levelSettings && pl->m_levelSettings->m_twoPlayerMode;
+			for (int k = 0; k < 2; ++k) m_respawnRelease.fallbackPhys[k] = snapshotOf(playerForKey(pl, k == 1));
 			log::info("record: key held at the checkpoint (P1={} P2={}), release expected at tick {}",
 				m_held[0], m_held[1], m_respawnRelease.tick);
 		}
@@ -234,7 +235,15 @@ namespace db {
 		return s;
 	}
 
-	void MacroManager::emitRespawnRelease(PhysSnapshot const& phys, char const* how) {
+	PlayerObject* MacroManager::playerForKey(GJBaseGameLayer* gl, bool player2) {
+		if (!gl) return nullptr;
+		// In a 2-player level the P2 key moves player 2 only while dual mode is on (Duelo Maestro:
+		// before the dual portal a P2-key press made player 1 jump).
+		bool twoPlayer = gl->m_levelSettings && gl->m_levelSettings->m_twoPlayerMode;
+		return (player2 && twoPlayer && gl->m_gameState.m_isDualMode) ? gl->m_player2 : gl->m_player1;
+	}
+
+	void MacroManager::emitRespawnRelease(PhysSnapshot const (&phys)[2], char const* how) {
 		for (int k = 0; k < 2; ++k) {
 			if (!m_held[k]) continue;
 			MacroInput in;
@@ -242,7 +251,7 @@ namespace db {
 			in.button = 1;
 			in.down = false;
 			in.player2 = k == 1;
-			in.phys = phys;
+			in.phys = phys[k];
 			m_macro.inputs.push_back(in);
 			m_held[k] = false;
 			log::info("record: added release for key {} at tick {} ({})", k == 1 ? "P2" : "P1", in.frame, how);
@@ -276,7 +285,14 @@ namespace db {
 		// First input at/after the post-respawn tick (normally GD's own release): end the held
 		// key(s) here, with the state this input is applied to.
 		if (m_respawnRelease.active && tick >= m_respawnRelease.tick) {
-			emitRespawnRelease(snapshotOf(player), down ? "before a press" : "GD's respawn release");
+			{
+			// The arriving input's key gets its player's state now; the other key its own player's.
+			PhysSnapshot now[2];
+			auto gl = PlayLayer::get();
+			for (int k = 0; k < 2; ++k)
+				now[k] = (k == 1) == player2 ? snapshotOf(player) : snapshotOf(playerForKey(gl, k == 1));
+			emitRespawnRelease(now, down ? "before a press" : "GD's respawn release");
+		}
 		}
 
 		bool& held = m_held[player2 ? 1 : 0];
@@ -350,7 +366,6 @@ namespace db {
 	void MacroManager::dispatchDue(GJBaseGameLayer* gl, uint32_t tick, bool late) {
 		if (!isPlaying() || !gl) return;
 		auto const& inputs = m_play->inputs;
-		bool twoPlayer = gl->m_levelSettings && gl->m_levelSettings->m_twoPlayerMode;
 		bool correct = (settings::physicsCorrection() || (m_startPosAttempt && settings::startPosCorrection())) && !m_quiet;
 		bool logEach = settings::logInputs() && !m_quiet;
 
@@ -374,7 +389,7 @@ namespace db {
 					m_cursor - 1, mi.frame, tick, late ? "after the step" : "missed step");
 			}
 
-			PlayerObject* p = (!mi.player2 || !twoPlayer) ? gl->m_player1 : gl->m_player2;
+			PlayerObject* p = playerForKey(gl, mi.player2);
 			// Recordings are made at 1 step per frame (240 FPS) where every input is on the first
 			// step of its frame. On a later step of a multi-step frame (speedhack > 1x, frame drops)
 			// the player's position at this point reads one step off even though the run is

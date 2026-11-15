@@ -193,10 +193,10 @@ class $modify(DBBaseGameLayer, GJBaseGameLayer) {
 			return;
 		}
 
-		// P1/P2 is the *key* that was pressed (e.g. up arrow = P2 key). In a 1-player
-		// level both keys control player 1, so snapshot/log the player that actually moves.
-		bool twoPlayer = m_levelSettings && m_levelSettings->m_twoPlayerMode;
-		auto p = (isPlayer1 || !twoPlayer) ? m_player1 : m_player2;
+		// P1/P2 is the *key* that was pressed (e.g. up arrow = P2 key). In a 1-player level both
+		// keys control player 1; in a 2-player level too, until dual mode starts (only then is
+		// there a player 2 to move). Snapshot/log the player that actually moves.
+		auto p = db::MacroManager::playerForKey(this, !isPlayer1);
 
 		// Record before calling the original, so the snapshot is the state the input was applied to.
 		mgr.onInput(m_gameState.m_currentProgress, down, button, !isPlayer1, p);
