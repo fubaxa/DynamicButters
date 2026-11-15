@@ -19,6 +19,7 @@ class GameObject;
 //   A,attempt,tick,practice                attempt start (also after every practice respawn)
 //   S,tick,step,x,y,xVel,yVel,rot,...      end of a physics step (columns listed in the header);
 //                                          posX,posY = hitbox centre, per step (x,y = sprite, per frame)
+//   S2,...                                 the same for player 2, after S, while dual mode is on (v6)
 //   I,tick,down,button,p2key,macro,x,y,yVel  input applied by GD (state right before it)
 //   O,tick,kind,player,objectID,ox,oy,rx,ry,rw,rh,objRot,objOBB(8),playerRot,playerOBB(8)
 //                                          interaction: orb / pad / trigger / pickup + its hitbox
@@ -27,7 +28,8 @@ class GameObject;
 //   P,tick,player,objectID,...             portal used (player's last activated portal changed),
 //                                          same columns after objectID as O
 //   U,tick,player,objectID,ox,oy,rx,ry,rw,rh orb actually used (ringJump changed the player's state)
-//   D,tick,objectID,ox,oy,rx,ry,rw,rh,dead   destroyPlayer (dead = the player actually died);
+//   D,tick,objectID,ox,oy,rx,ry,rw,rh,dead,player   destroyPlayer (dead = the player actually
+//                                          died; player 1 or 2, v6);
 //                                          GD's own anticheat-spike calls are left out
 //   C,tick                                 level complete; nothing more until the next attempt
 // O/U/D/C are held and written right before the S row of the step they belong to, with its tick.
