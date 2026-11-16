@@ -11,7 +11,8 @@ namespace db::gdr2 {
 	namespace {
 		constexpr int FORMAT_VERSION = 2;
 		constexpr int GAME_VERSION = 22091;
-		constexpr uint64_t EXT_VERSION = 5; // 2: + start ticks, 3: + x path, 4: + Dynamic windows, 5: + exact counts
+		constexpr uint64_t EXT_VERSION = 6; // 2: + start ticks, 3: + x path, 4: + Dynamic windows, 5: + exact counts,
+		                                    // 6: + rotation track
 		constexpr char const* PHYS_TAG = "Phys";
 		constexpr uint64_t MAX_STRING = 0xFFFF; // same limit as the reference reader
 
@@ -158,6 +159,15 @@ namespace db::gdr2 {
 			ext.varint(in.window.lateExact);
 			prevWinTick = in.frame;
 		}
+		// v6: rotation track (tick delta, player bit, angle as float)
+		ext.varint(macro.rotTrack.size());
+		uint64_t prevRotTick = 0;
+		for (auto const& k : macro.rotTrack) {
+			ext.varint(k.tick - prevRotTick);
+			ext.varint(k.player2 ? 1u : 0u);
+			ext.raw<float>(k.rotation);
+			prevRotTick = k.tick;
+		}
 		w.block(ext);
 
 		w.varint(0); // deaths
@@ -266,6 +276,19 @@ namespace db::gdr2 {
 					wins.push_back(e);
 				}
 				if (!ext.ok()) wins.clear();
+			}
+			if (extVersion >= 6) {
+				auto count = ext.varint();
+				uint64_t t = 0;
+				for (uint64_t i = 0; i < count && ext.ok(); ++i) {
+					RotKey k;
+					t += ext.varint();
+					k.tick = static_cast<uint32_t>(t);
+					k.player2 = ext.varint() != 0;
+					k.rotation = ext.raw<float>();
+					m.rotTrack.push_back(k);
+				}
+				if (!ext.ok()) m.rotTrack.clear();
 			}
 		}
 

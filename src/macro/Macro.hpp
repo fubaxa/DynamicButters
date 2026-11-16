@@ -49,6 +49,14 @@ namespace db {
 		InputWindow window;   // Dynamic window scan result
 	};
 
+	// The player's angle at the end of one step (tick), recorded after practice respawns (see
+	// MacroManager: "rotation track"). player2 = the second player (m_player2), not the P2 key.
+	struct RotKey {
+		uint32_t tick = 0;
+		bool player2 = false;
+		float rotation = 0.f;
+	};
+
 	struct Macro {
 		int levelID = 0;
 		std::string levelName;
@@ -61,6 +69,7 @@ namespace db {
 		std::vector<MacroInput> inputs; // sorted by frame, P1 and P2 keys interleaved
 		std::vector<uint32_t> startTicks; // macro start positions (M8), sorted
 		std::vector<PathPoint> path;      // the run's x over time (corner points), for level start positions
+		std::vector<RotKey> rotTrack;     // angles per step after practice respawns, sorted by tick
 
 		// Whether the macro holds a key at the end of `tick` (after inputs at exactly `tick`).
 		bool heldAt(uint32_t tick) const {
@@ -95,6 +104,7 @@ namespace db {
 		void clear() {
 			inputs.clear();
 			path.clear();
+			rotTrack.clear();
 			endFrame = 0;
 		}
 	};

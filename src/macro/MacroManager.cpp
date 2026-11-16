@@ -171,6 +171,13 @@ namespace db {
 			}
 			m_playHeld[0] = m_playHeld[1] = false;
 			for (size_t i = 0; i < m_cursor; ++i) m_playHeld[in[i].player2 ? 1 : 0] = in[i].down;
+			{
+				auto const& rt = m_play->rotTrack;
+				m_rotCursor = std::upper_bound(rt.begin(), rt.end(), macroTick,
+					[](int64_t t, RotKey const& k) { return t < int64_t(k.tick); }) - rt.begin();
+				m_rotHaveStart = false;
+				m_rotGdDelta[0] = m_rotGdDelta[1] = 0.f;
+			}
 			if (fresh && atStartPos) {
 				// The macro is holding at the start position: press right away (dispatchDue).
 				for (int k = 0; k < 2; ++k) m_startPress[k] = m_playHeld[k];
@@ -197,6 +204,7 @@ namespace db {
 			m_held[0] = m_held[1] = false;
 			m_dropped = 0;
 			m_startPosAttempt = false;
+			m_rotCap[0] = m_rotCap[1] = {};
 			m_pathBuilder.reset();
 			if (pl && pl->m_player1) m_pathBuilder.add(tick, pl->m_player1->m_position.x);
 			return;
@@ -206,7 +214,9 @@ namespace db {
 		if (pl && pl->m_player1) m_pathBuilder.cutBack(tick, pl->m_player1->m_position.x);
 		auto before = m_macro.inputs.size();
 		std::erase_if(m_macro.inputs, [tick](MacroInput const& in) { return in.frame > tick; });
+		std::erase_if(m_macro.rotTrack, [tick](RotKey const& k) { return k.tick > tick; });
 		m_macro.endFrame = 0;
+		startRotCapture(pl, tick);
 		recomputeHeld();
 		m_respawnRelease = {};
 		log::info("record: respawn at tick {} (practice={}), removed {} inputs, {} left",
@@ -273,6 +283,75 @@ namespace db {
 		emitRespawnRelease(m_respawnRelease.fallbackPhys, "fallback, respawn state");
 	}
 
+	void MacroManager::startRotCapture(GJBaseGameLayer* gl, uint32_t tick) {
+		m_rotInputSeen = false;
+		m_rotSteps = 0;
+		for (int k = 0; k < 2; ++k) {
+			PlayerObject* p = gl ? (k == 0 ? gl->m_player1 : gl->m_player2) : nullptr;
+			m_rotCap[k].on = p && (k == 0 || gl->m_gameState.m_isDualMode);
+			m_rotCap[k].last = p ? p->getRotation() : 0.f;
+		}
+	}
+
+	void MacroManager::onStepBegin(GJBaseGameLayer* gl, uint32_t tick) {
+		if (!gl || !isPlaying() || !m_play) return;
+		auto const& rt = m_play->rotTrack;
+		int64_t target = int64_t(tick) + 2 + m_tickOffset;
+		while (m_rotCursor < rt.size() && int64_t(rt[m_rotCursor].tick) < target) m_rotCursor++;
+		m_rotTrackStep = m_rotCursor < rt.size() && int64_t(rt[m_rotCursor].tick) == target;
+		for (int k = 0; k < 2; ++k) {
+			PlayerObject* p = k == 0 ? gl->m_player1 : gl->m_player2;
+			if (!p) continue;
+			// Pre-set the angle so that after GD's own turn on this step (taken to be the same as on
+			// the last step) it is the recorded one when the step's collisions run; afterStep then
+			// puts the exact value back.
+			for (size_t i = m_rotCursor; i < rt.size() && int64_t(rt[i].tick) == target; ++i) {
+				if (rt[i].player2 == (k == 1)) p->setRotation(rt[i].rotation - m_rotGdDelta[k]);
+			}
+			m_rotStart[k] = p->getRotation();
+		}
+		m_rotHaveStart = true;
+	}
+
+	void MacroManager::afterStep(GJBaseGameLayer* gl, uint32_t tick) {
+		if (!gl) return;
+		if (isPlaying() && m_play) {
+			auto const& rt = m_play->rotTrack;
+			int64_t now = int64_t(tick) + m_tickOffset;
+			for (int k = 0; k < 2; ++k) {
+				PlayerObject* p = k == 0 ? gl->m_player1 : gl->m_player2;
+				if (!p) continue;
+				if (m_rotHaveStart) m_rotGdDelta[k] = p->getRotation() - m_rotStart[k];
+				for (size_t i = m_rotCursor; i < rt.size() && int64_t(rt[i].tick) == now; ++i) {
+					if (rt[i].player2 != (k == 1)) continue;
+					p->setRotation(rt[i].rotation);
+					m_stats.rotTrack++;
+				}
+			}
+			m_rotHaveStart = false;
+			m_rotTrackStep = false;
+		}
+		if (!isRecording()) return;
+		bool any = false;
+		for (int k = 0; k < 2; ++k) {
+			auto& c = m_rotCap[k];
+			if (!c.on) continue;
+			PlayerObject* p = k == 0 ? gl->m_player1 : gl->m_player2;
+			if (!p || (k == 1 && !gl->m_gameState.m_isDualMode)) { c.on = false; continue; }
+			float rot = p->getRotation();
+			m_macro.rotTrack.push_back({tick, k == 1, rot});
+			// It turns by itself again (landed, switched, or GD's spin is back) and an input has been
+			// recorded since the respawn: from here on both runs turn alike.
+			if (m_rotInputSeen && std::abs(rot - c.last) > 1e-4f) c.on = false;
+			c.last = rot;
+			any |= c.on;
+		}
+		if (any && ++m_rotSteps > 2400) {
+			log::warn("record: rotation track after the respawn stopped after 2400 steps");
+			m_rotCap[0].on = m_rotCap[1].on = false;
+		}
+	}
+
 	void MacroManager::recomputeHeld() {
 		m_held[0] = m_held[1] = false;
 		for (auto const& in : m_macro.inputs) m_held[in.player2 ? 1 : 0] = in.down;
@@ -304,6 +383,7 @@ namespace db {
 		}
 		held = down;
 
+		m_rotInputSeen = true;
 		MacroInput in;
 		in.frame = tick;
 		in.button = static_cast<uint8_t>(button);
@@ -411,11 +491,24 @@ namespace db {
 					m_stats.maxDyVel = std::max(m_stats.maxDyVel, dyv);
 					m_stats.maxDrot = std::max(m_stats.maxDrot, drot);
 				}
+				// The rotation is put back at every input even with Physics correction off. After a
+				// practice respawn in the air GD restores the angle but not the spin: a ball (sometimes
+				// a cube) stops turning until it lands or switches, and the recording carries on with an
+				// angle an unbroken playback doesn't have. Objects turned by odd angles collide with the
+				// player's box turned by its rotation, so that alone desyncs the macro (The Hallucination:
+				// a ball respawned at tick 8490 ended up 80 degrees off and died at tick 9146). From the
+				// input on, both runs turn by the same amounts, so this lines them up again.
+				bool fixRot = !correct && measurable && hasRot && drot > 1e-4 && !m_quiet && !m_rotTrackStep;
 				if (logEach) {
 					log::info("play: {} key={} tick={} step={} drift dx={:.6f} dy={:.6f} dyVel={:.6f} drot={:.4f}{}",
 						mi.down ? "PRESS  " : "RELEASE", mi.player2 ? "P2" : "P1", mi.frame, step,
 						dx, dy, dyv, drot,
-						!measurable ? " (not measured: later step of frame)" : correct ? " (corrected)" : "");
+						!measurable ? " (not measured: later step of frame)" : correct ? " (corrected)"
+							: fixRot ? " (rotation corrected)" : "");
+				}
+				if (fixRot) {
+					p->setRotation(mi.phys.rotation);
+					m_stats.rotCorrected++;
 				}
 				if (correct && measurable) {
 					cocos2d::CCPoint pos{mi.phys.x, mi.phys.y};
@@ -438,9 +531,11 @@ namespace db {
 	void MacroManager::logPlaybackSummary(char const* reason) {
 		if (!m_play) return;
 		log::info(
-			"playback: {} - {} of {} inputs applied, {} late, {} corrected, {} not measured; max drift before correction "
-			"dx={:.6f} (at tick {}) dy={:.6f} dyVel={:.6f} drot={:.4f}",
-			reason, m_stats.dispatched, m_play->inputs.size(), m_stats.late, m_stats.corrected, m_stats.unmeasured,
+			"playback: {} - {} of {} inputs applied, {} late, {} corrected, {} rotation only, {} not measured, "
+			"{} steps from the rotation track; max drift before correction dx={:.6f} (at tick {}) dy={:.6f} "
+			"dyVel={:.6f} drot={:.4f}",
+			reason, m_stats.dispatched, m_play->inputs.size(), m_stats.late, m_stats.corrected, m_stats.rotCorrected,
+			m_stats.unmeasured, m_stats.rotTrack,
 			m_stats.maxDx, m_stats.maxAtTick, m_stats.maxDy, m_stats.maxDyVel, m_stats.maxDrot);
 	}
 

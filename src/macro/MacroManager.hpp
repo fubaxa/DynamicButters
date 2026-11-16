@@ -84,6 +84,8 @@ namespace db {
 		void onLevelComplete(PlayLayer* pl, uint32_t tick);
 		void onQuit();
 		void onStepEnd(uint32_t tick, PlayerObject* player);              // end of every processCommands
+		void onStepBegin(GJBaseGameLayer* gl, uint32_t tick);             // start of every processCommands
+		void afterStep(GJBaseGameLayer* gl, uint32_t tick);               // after it (tick = the new tick)
 
 		// --- playback ---
 		// Should an input that did not come from the macro be dropped? (Player's own clicks.)
@@ -135,6 +137,26 @@ namespace db {
 
 		static PhysSnapshot snapshotOf(PlayerObject* player);
 
+		// Rotation track. After a practice respawn in the air GD restores the angle but not the spin
+		// (a ball, sometimes a cube, stops turning until it lands or switches), so the recorded run
+		// has angles an unbroken playback doesn't. Objects turned by odd angles collide with the
+		// player's box turned by its rotation, so the angle matters: the recorder keeps every step's
+		// angle after a respawn until the player turns by itself again and an input has passed,
+		// and playback puts those angles back step by step.
+		struct RotCapture {
+			bool on = false;
+			float last = 0.f;
+		} m_rotCap[2];
+		bool m_rotInputSeen = false;
+		uint32_t m_rotSteps = 0;
+		size_t m_rotCursor = 0;
+		float m_rotStart[2] = {0.f, 0.f}; // angle at the start of this step (after the pre-set)
+		float m_rotGdDelta[2] = {0.f, 0.f}; // GD's own turn on the last step, per player
+		bool m_rotHaveStart = false;
+		bool m_rotTrackStep = false; // this step's angle comes from the track (inputs leave it alone)
+		uint32_t m_rotApplied = 0;
+		void startRotCapture(GJBaseGameLayer* gl, uint32_t tick);
+
 		// last completed recording this session, so Playback works right after recording even if saving failed
 		std::optional<Macro> m_lastRecording;
 		std::string m_lastSaved; // file name of the last saved recording
@@ -167,6 +189,8 @@ namespace db {
 			uint32_t dispatched = 0;
 			uint32_t late = 0;
 			uint32_t corrected = 0;
+			uint32_t rotCorrected = 0; // inputs where only the rotation was put back (see dispatchDue)
+			uint32_t rotTrack = 0;     // steps whose angle came from the rotation track
 			uint32_t unmeasured = 0; // inputs on a later step of a multi-step frame (see dispatchDue)
 			double maxDx = 0, maxDy = 0, maxDyVel = 0, maxDrot = 0;
 			uint32_t maxAtTick = 0;

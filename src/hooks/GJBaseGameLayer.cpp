@@ -114,6 +114,7 @@ class $modify(DBBaseGameLayer, GJBaseGameLayer) {
 		db::runtime::stepInFrame = f->stepsThisFrame;
 		if (isLastTick) f->windowLastTicks++;
 
+		db::MacroManager::get().onStepBegin(this, before);
 		f->inProcessCommands = true;
 		db::runtime::inStep = true;
 		GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
@@ -127,6 +128,7 @@ class $modify(DBBaseGameLayer, GJBaseGameLayer) {
 
 		auto pl = static_cast<PlayLayer*>(static_cast<GJBaseGameLayer*>(this));
 		db::MacroManager::get().onStepEnd(after, m_player1);
+		db::MacroManager::get().afterStep(this, after);
 		db::checkpoints::onStepEnd(pl);
 		db::speedprobe::onStepEnd(pl, after);
 		db::scan::onStepEnd(pl, after);
