@@ -76,12 +76,43 @@ namespace db::trace {
 				f(c[0].x), f(c[0].y), f(c[1].x), f(c[1].y), f(c[2].x), f(c[2].y), f(c[3].x), f(c[3].y));
 		}
 
-		void writeHeader(PlayLayer* pl) {
+		// The level as it was played (GD's own level data, as stored in the save), written once per
+		// version to traces/layouts/<id>_<hash>.txt: a trace only matches the layout it was recorded on,
+		// and levels get edited or updated later. Returns the file name, or "" when there's no data.
+		std::string saveLayout(GJGameLevel* level, std::filesystem::path const& dir) {
+			if (!level) return "";
+			std::string const& data = level->m_levelString;
+			if (data.empty()) return "";
+			uint64_t h = 1469598103934665603ull;   // FNV-1a
+			for (unsigned char c : data) {
+				h ^= c;
+				h *= 1099511628211ull;
+			}
+			auto name = fmt::format("{}_{:016x}.txt", level->m_levelID.value(), h);
+			auto ldir = dir / "layouts";
+			std::error_code ec;
+			std::filesystem::create_directories(ldir, ec);
+			auto file = ldir / std::filesystem::u8path(name);
+			if (!std::filesystem::exists(file, ec)) {
+				std::ofstream o(file, std::ios::out | std::ios::binary | std::ios::trunc);
+				o << data;
+				if (!o) {
+					log::warn("trace: could not write the layout {}", file.string());
+					return "";
+				}
+				log::info("trace: layout saved to {}", file.string());
+			}
+			return name;
+		}
+
+		void writeHeader(PlayLayer* pl, std::filesystem::path const& dir) {
 			auto level = pl->m_level;
 			s.out << "# DynamicButter physics trace v6\n";
 			s.out << fmt::format("# level id={} name={} gd={}\n",
 				level ? level->m_levelID.value() : 0, level ? std::string(level->m_levelName) : "?",
 				GEODE_GD_VERSION_STRING);
+			auto layout = saveLayout(level, dir);
+			if (!layout.empty()) s.out << "# layout layouts/" << layout << "\n";
 			s.out << "# ticks: m_currentProgress, +2 per physics step (240 steps/s)\n";
 			if (auto ls = pl->m_levelSettings) {
 				s.out << fmt::format(
@@ -150,7 +181,7 @@ namespace db::trace {
 			s.path = file.string();
 			s.attempt = 0;
 			s.steps = 0;
-			writeHeader(pl);
+			writeHeader(pl, dir);
 			log::info("trace: writing {}", s.path);
 			return true;
 		}
