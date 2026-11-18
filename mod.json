@@ -79,8 +79,8 @@
 		"speedhack": {
 			"type": "float",
 			"default": 1.0,
-			"min": 0.1,
-			"max": 2.0,
+			"min": 0.01,
+			"max": 4.0,
 			"control": {
 				"arrow-step": 0.05,
 				"slider-step": 0.05

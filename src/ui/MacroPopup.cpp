@@ -3,6 +3,7 @@
 #include <Geode/Geode.hpp>
 #include <Geode/ui/GeodeUI.hpp>
 #include <Geode/ui/ScrollLayer.hpp>
+#include <Geode/ui/TextInput.hpp>
 #include <Geode/utils/file.hpp>
 
 #include <algorithm>
@@ -498,9 +499,9 @@ namespace db::ui {
 		std::vector<CCNode*> m_bottomRow;
 		CCMenuItemToggler* m_speedToggle = nullptr;
 		Slider* m_speedSlider = nullptr;
-		CCLabelBMFont* m_speedValue = nullptr;
+		TextInput* m_speedValue = nullptr;
 
-		static constexpr float SPEED_MIN = 0.1f, SPEED_MAX = 2.0f, SPEED_STEP = 0.05f;
+		static constexpr float SPEED_MIN = 0.01f, SPEED_MAX = 4.0f, SPEED_STEP = 0.05f;
 
 		// Places visible nodes side by side, centred on the popup, with `gap` between each pair.
 		// m_mainLayer and m_buttonMenu have the same size and position, so x/y work for both.
@@ -526,7 +527,7 @@ namespace db::ui {
 
 		static float speedFromSlider(float v) {
 			float speed = SPEED_MIN + v * (SPEED_MAX - SPEED_MIN);
-			return std::round(speed / SPEED_STEP) * SPEED_STEP;
+			return std::max(SPEED_MIN, std::round(speed / SPEED_STEP) * SPEED_STEP);
 		}
 
 		static float sliderFromSpeed(float speed) {
@@ -590,7 +591,12 @@ namespace db::ui {
 			m_speedSlider->setAnchorPoint({0.5f, 0.5f});
 			m_mainLayer->addChild(m_speedSlider);
 
-			m_speedValue = label("1.00x", "bigFont.fnt", 0.45f);
+			// Typeable speed: applied as you type (clamped to the slider's range).
+			m_speedValue = TextInput::create(50.f, "1.00", "bigFont.fnt");
+			m_speedValue->setCommonFilter(CommonFilter::Float);
+			m_speedValue->setMaxCharCount(5);
+			m_speedValue->setScale(0.8f);
+			m_speedValue->setCallback([this](std::string const& text) { this->onSpeedTyped(text); });
 			m_mainLayer->addChild(m_speedValue);
 			// Fixed width for the value so the row doesn't shift while dragging.
 			auto valueBox = CCNode::create();
@@ -642,10 +648,22 @@ namespace db::ui {
 			refreshSpeed(m_speedToggle->isToggled());
 		}
 
-		void refreshSpeed(bool enabled) {
+		void onSpeedTyped(std::string const& text) {
+			char* end = nullptr;
+			float speed = std::strtof(text.c_str(), &end);
+			if (text.empty() || end == text.c_str() || !std::isfinite(speed)) return;
+			speed = std::clamp(speed, SPEED_MIN, SPEED_MAX);
+			Mod::get()->setSettingValue<double>("speedhack", speed);
+			m_speedSlider->setValue(sliderFromSpeed(speed));
+			// Leave the text as typed (rewriting it would fight the cursor); only the colour.
+			refreshSpeed(m_speedToggle->isToggled(), false);
+		}
+
+		void refreshSpeed(bool enabled, bool setText = true) {
 			float speed = static_cast<float>(Mod::get()->getSettingValue<double>("speedhack"));
-			m_speedValue->setString(fmt::format("{:.2f}x", speed).c_str());
-			m_speedValue->setColor(enabled ? ccColor3B{255, 255, 255} : ccColor3B{130, 130, 130});
+			if (setText) m_speedValue->setString(fmt::format("{:.3g}", speed));
+			m_speedValue->getInputNode()->setLabelNormalColor(
+				enabled ? ccColor3B{255, 255, 255} : ccColor3B{130, 130, 130});
 		}
 
 		void refresh() {
